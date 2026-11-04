@@ -1,0 +1,420 @@
+<!doctype html>
+<html id="htmlRoot" lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mapivo</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="first-run" id="firstRun" hidden>
+  <div class="first-run-card">
+    <svg class="first-run-logo" viewBox="0 0 32 32" width="56" height="56" aria-hidden="true">
+      <path d="M9 10h14a6 6 0 0 1 5.9 4.9l1.1 6.2a4.2 4.2 0 0 1-7.3 3.4l-1.9-2.4h-9.6l-1.9 2.4a4.2 4.2 0 0 1-7.3-3.4l1.1-6.2A6 6 0 0 1 9 10z" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <circle cx="11" cy="16" r="3.2" fill="currentColor"/>
+      <circle cx="23" cy="17.5" r="1.4" fill="currentColor"/>
+    </svg>
+    <h1>Mapivo</h1>
+    <p class="first-run-tagline" data-i18n="firstRun.tagline">Your controller. Every game. Your way.</p>
+    <p class="first-run-ask" data-i18n="firstRun.ask">Choose your language</p>
+    <div class="first-run-langs">
+      <button class="lang-choice selected" data-lang="en">English</button>
+      <button class="lang-choice" data-lang="fa">فارسی</button>
+    </div>
+    <button class="btn primary first-run-start" id="firstRunStart">
+      <i data-icon="play"></i><span data-i18n="firstRun.start">Start</span>
+    </button>
+  </div>
+</div>
+<div class="app">
+  <aside class="rail">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true">
+        <path d="M9 10h14a6 6 0 0 1 5.9 4.9l1.1 6.2a4.2 4.2 0 0 1-7.3 3.4l-1.9-2.4h-9.6l-1.9 2.4a4.2 4.2 0 0 1-7.3-3.4l1.1-6.2A6 6 0 0 1 9 10z" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <circle cx="11" cy="16" r="3.2" fill="currentColor"/>
+        <circle cx="23" cy="17.5" r="1.4" fill="currentColor"/>
+      </svg>
+      <span>Mapivo</span>
+    </div>
+    <nav id="nav">
+      <button class="nav-item active" data-page="dashboard"><i data-icon="grid"></i><span data-i18n="nav.dashboard">Dashboard</span></button>
+      <button class="nav-item" data-page="controllers"><i data-icon="gamepad"></i><span data-i18n="nav.controllers">Controllers</span></button>
+      <button class="nav-item" data-page="mapping"><i data-icon="sort"></i><span data-i18n="nav.mapping">Mapping</span></button>
+      <button class="nav-item" data-page="profiles"><i data-icon="layers"></i><span data-i18n="nav.profiles">Profiles</span></button>
+      <button class="nav-item" data-page="priority"><i data-icon="sort"></i><span data-i18n="nav.priority">Priority</span></button>
+      <button class="nav-item" data-page="driver"><i data-icon="wrench"></i><span data-i18n="nav.driver">Virtual driver</span></button>
+      <button class="nav-item" data-page="guide"><i data-icon="help"></i><span data-i18n="nav.guide">Guide</span></button>
+      <button class="nav-item" data-page="settings"><i data-icon="gear"></i><span data-i18n="nav.settings">Settings</span></button>
+      <button class="nav-item" data-page="logs"><i data-icon="terminal"></i><span data-i18n="nav.logs">Logs</span></button>
+    </nav>
+    <div class="rail-foot">
+      <div class="chip" id="connChip"><span class="dot" id="connDot"></span><span id="connText" data-i18n="conn.scanning">Scanning</span></div>
+      <div class="ver">v1.0</div>
+    </div>
+  </aside>
+
+  <main id="main">
+    <section class="page active" id="page-dashboard">
+      <header class="page-head">
+        <div>
+          <h1 data-i18n="dashboard.title">Dashboard</h1>
+          <p class="sub" data-i18n="dashboard.sub">Pick a game, map physical pads to virtual slots, then launch. Each game keeps its own profile.</p>
+        </div>
+        <button class="btn ghost" data-act="rescan"><i data-icon="refresh"></i><span data-i18n="common.rescan">Rescan</span></button>
+      </header>
+
+      <div class="card onboard" id="onboardCard" hidden>
+        <div class="onboard" id="onboardStep1">
+          <div class="onboard-ic"><i data-icon="layers"></i></div>
+          <h2 data-i18n="onboard.emptyTitle">No profile yet</h2>
+          <p class="sub" data-i18n="onboard.emptySub">Make a profile for your game once. After that it opens with the right controller settings every time.</p>
+          <button class="btn primary" data-act="browse"><i data-icon="folder"></i><span data-i18n="onboard.newProfile">New profile</span></button>
+        </div>
+        <div class="onboard" id="onboardStep2" hidden>
+          <div class="onboard-ic ok"><i data-icon="check"></i></div>
+          <h2 id="onboardGame"></h2>
+          <p class="sub" data-i18n="onboard.readySub">Your profile is ready. Three short steps and you can play.</p>
+          <ol class="onboard-steps">
+            <li><span data-i18n="onboard.s1">Pick which pad plays as which slot</span><button class="btn ghost sm" data-goto="dashboard"><span data-i18n="onboard.here">Here</span></button></li>
+            <li><span data-i18n="onboard.s2">Check the buttons on the pad</span><button class="btn ghost sm" data-goto="mapping"><span data-i18n="onboard.open">Open</span></button></li>
+            <li><span data-i18n="onboard.s3">Copy the files into the game and launch</span><button class="btn ghost sm" data-act="install"><span data-i18n="onboard.copy">Copy</span></button></li>
+          </ol>
+          <div class="onboard-actions">
+            <button class="btn primary" data-act="launch" id="onboardLaunch"><i data-icon="play"></i><span data-i18n="launch.launch">Launch</span></button>
+            <button class="btn ghost" data-act="browse"><i data-icon="folder"></i><span data-i18n="onboard.otherGame">Another game</span></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="stat-row">
+        <div class="stat"><span class="stat-k" data-i18n="stat.pads">Physical pads</span><span class="stat-v" id="statPads">0</span></div>
+        <div class="stat"><span class="stat-k" data-i18n="stat.xinput">XInput slots</span><span class="stat-v" id="statXInput">0</span></div>
+        <div class="stat"><span class="stat-k" data-i18n="stat.di">DirectInput pads</span><span class="stat-v" id="statDi">0</span></div>
+        <div class="stat"><span class="stat-k" data-i18n="stat.profiles">Profiles saved</span><span class="stat-v" id="statProfiles">0</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2 data-i18n="connected.title">Connected pads</h2><span class="hint" id="scanHint"></span></div>
+        <div id="padGrid" class="pad-grid"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2 data-i18n="launch.title">Launch</h2></div>
+        <div class="launch-row">
+          <div class="game-slot">
+            <button class="game-pick" id="gamePick" data-act="profileMenu" aria-haspopup="listbox" aria-expanded="false">
+              <div class="gp-main">
+                <div class="game-name" id="gameName">No game selected</div>
+                <div class="game-meta" id="gameMeta">Choose an .exe to create or load its profile</div>
+              </div>
+              <i class="gp-caret" data-icon="chevD"></i>
+            </button>
+            <div class="profile-menu" id="profileMenu" role="listbox" hidden>
+              <div class="pm-head"><i data-icon="layers"></i><span data-i18n="pm.title">Your profiles</span></div>
+              <div class="pm-list" id="pmList"></div>
+              <button class="pm-new" data-act="browse"><i data-icon="plus"></i><span data-i18n="pm.new">New profile…</span></button>
+            </div>
+          </div>
+          <div class="launch-actions">
+            <button class="btn ghost" data-act="browse"><i data-icon="folder"></i><span data-i18n="launch.browse">Browse</span></button>
+            <div class="split-btn">
+              <button class="btn primary" id="launchBtn" disabled data-act="launch"><i data-icon="play"></i><span data-i18n="launch.launch">Launch</span></button>
+              <button class="btn primary split-caret" id="launchPick" disabled data-act="launchMenu" aria-haspopup="listbox" aria-expanded="false" data-i18n-title="launch.pickTip"><i data-icon="chevD"></i></button>
+              <div class="profile-menu lm" id="launchMenu" role="listbox" hidden>
+                <div class="pm-head"><i data-icon="layers"></i><span data-i18n="pm.choose">Choose a profile</span></div>
+                <div class="pm-list" id="lmList"></div>
+                <button class="pm-new" data-act="browse"><i data-icon="plus"></i><span data-i18n="pm.new">New profile…</span></button>
+              </div>
+            </div>
+            <button class="btn ghost" data-act="install" data-i18n-title="launch.copyTip"><i data-icon="save"></i><span data-i18n="launch.copy">Copy to game</span></button>
+            <button class="btn ghost" data-act="unhook" data-i18n-title="launch.removeHookTip"><i data-icon="trash"></i></button>
+          </div>
+        </div>
+        <div class="arch-line" id="archLine"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2 data-i18n="slotmap.title">Slot map</h2><button class="btn ghost sm" data-act="saveSlots"><span data-i18n="common.save">Save</span></button></div>
+        <div id="slotGrid" class="slot-grid"></div>
+      </div>
+    </section>
+
+    <section class="page" id="page-controllers">
+      <header class="page-head">
+        <div><h1 data-i18n="controllers.title">Controllers</h1><p class="sub" data-i18n="controllers.sub">Fine-tune deadzones for the active profile. Vibration is per slot.</p></div>
+      </header>
+      <div class="card">
+        <div class="card-head"><h2 data-i18n="controllers.assignments">Slot assignments</h2></div>
+        <div id="ctrlGrid" class="slot-grid"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2 data-i18n="controllers.deadzones">Stick deadzones</h2></div>
+        <div class="slider-row">
+          <label for="leftDz" data-i18n="controllers.leftStick">Left stick</label>
+          <input type="range" id="leftDz" min="0" max="0.4" step="0.01" value="0.08">
+          <output id="leftDzOut">0.08</output>
+        </div>
+        <div class="slider-row">
+          <label for="rightDz" data-i18n="controllers.rightStick">Right stick</label>
+          <input type="range" id="rightDz" min="0" max="0.4" step="0.01" value="0.08">
+          <output id="rightDzOut">0.08</output>
+        </div>
+        <div class="actions"><button class="btn primary" data-act="saveSlots"><i data-icon="save"></i><span data-i18n="controllers.saveProfile">Save to profile</span></button></div>
+      </div>
+    </section>
+
+    <section class="page" id="page-mapping">
+      <header class="page-head">
+        <div><h1 data-i18n="mapping.title">Mapping &amp; test</h1><p class="sub" data-i18n="mapping.sub">Check the pad, then rebind any button for the active game. Saved in that game's profile only.</p></div>
+        <button class="btn ghost" data-act="rescan"><i data-icon="refresh"></i><span data-i18n="common.rescan">Rescan</span></button>
+      </header>
+
+      <div class="card">
+        <div class="card-head"><h2 data-i18n="mapping.live">Live test</h2><span class="hint" id="liveHint" data-i18n="mapping.pressButton">Press a button</span></div>
+        <div class="map-toolbar">
+          <label data-i18n="mapping.virtualSlot">Virtual slot</label>
+          <select id="mapSlot">
+            <option value="0" data-i18n="mapping.v1">Virtual 1</option><option value="1" data-i18n="mapping.v2">Virtual 2</option>
+            <option value="2" data-i18n="mapping.v3">Virtual 3</option><option value="3" data-i18n="mapping.v4">Virtual 4</option>
+          </select>
+          <span class="tag" id="livePadTag">-</span>
+          <span class="vib-state off" id="vibState" data-i18n="mapping.vibOff">Vibration: off</span>
+          <div class="vib-levels" id="vibLevels">
+            <label class="vib-label" data-i18n="mapping.vibStrength">Strength</label>
+            <select id="vibLevelSel">
+              <option value="1" data-i18n="mapping.vibLow">Low</option>
+              <option value="2" selected data-i18n="mapping.vibMid">Medium</option>
+              <option value="3" data-i18n="mapping.vibHigh">High</option>
+            </select>
+            <button class="btn ghost sm" id="vibTestBtn" data-i18n="mapping.testVibRun">Test vibration</button>
+            <button class="btn ghost sm" id="vibInfBtn" data-i18n="mapping.vibInfinite">Endless</button>
+          </div>
+        </div>
+        <div class="live-split">
+          <div class="pad-view" id="padView"></div>
+          <div class="live-grid" id="liveGrid"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2 data-i18n="mapping.mapTitle">Per-game button map</h2><button class="btn ghost sm" data-act="saveMap"><i data-icon="save"></i><span data-i18n="mapping.saveGame">Save to game</span></button></div>
+        <p class="sub" style="margin:-6px 0 12px" data-i18n="mapping.pickText">Pick the physical button each virtual control should use. Default = same name.</p>
+        <div id="mapGrid" class="map-grid"></div>
+      </div>
+    </section>
+
+    <section class="page" id="page-profiles">
+      <header class="page-head">
+        <div><h1 data-i18n="profiles.title">Profiles</h1><p class="sub" data-i18n="profiles.sub">One JSON profile per game, stored independently so games never share settings.</p></div>
+      </header>
+      <div class="split">
+        <div class="card list-card">
+          <div class="card-head"><h2 data-i18n="profiles.saved">Saved</h2></div>
+          <div id="profileList" class="profile-list"></div>
+        </div>
+        <div class="card detail-card">
+          <div class="card-head"><h2 id="profileTitle" data-i18n="profiles.noProfile">No profile selected</h2></div>
+          <div class="field-row">
+            <label data-i18n="profiles.displayName">Display name</label>
+            <input type="text" id="profileName" placeholder="e.g. PES 2021">
+          </div>
+          <div class="field-row switch-row">
+            <label data-i18n="profiles.enabled">Enabled</label>
+            <label class="switch"><input type="checkbox" id="profileEnabled"><span></span></label>
+          </div>
+          <div class="kv" id="profileKv"></div>
+          <div class="actions">
+            <button class="btn primary" data-act="saveProfile"><i data-icon="save"></i><span data-i18n="profiles.save">Save profile</span></button>
+            <button class="btn danger" data-act="unhook"><i data-icon="trash"></i><span data-i18n="profiles.removeHook">Remove from game folder</span></button>
+            <button class="btn danger" data-act="deleteProfile"><i data-icon="trash"></i><span data-i18n="profiles.delete">Delete</span></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-priority">
+      <header class="page-head">
+        <div><h1 data-i18n="priority.title">Priority</h1><p class="sub" data-i18n="priority.sub">Order controls which physical pad takes which virtual slot for the selected game.</p></div>
+      </header>
+      <div class="card">
+        <div class="card-head"><h2 id="priorityTitle" data-i18n="priority.noGame">No game selected</h2></div>
+        <div id="priorityList" class="priority-list"></div>
+      </div>
+    </section>
+
+    <section class="page" id="page-driver">
+      <header class="page-head">
+        <div>
+          <h1 data-i18n="driver.title">Virtual driver</h1>
+          <p class="sub" data-i18n="driver.sub">Mapivo does not install a system driver. Everything below is about the two ways a pad can reach a game.</p>
+        </div>
+        <button class="btn ghost" data-act="driverRefresh"><i data-icon="refresh"></i><span data-i18n="driver.check">Check again</span></button>
+      </header>
+
+      <div class="card tip-card">
+        <div class="tip-ic"><i data-icon="info"></i></div>
+        <div>
+          <div class="tip-title" data-i18n="driver.tipTitle">Tip: a profile is the better choice</div>
+          <p class="tip-text" data-i18n="driver.tipText">For the best experience use a game profile together with XInput instead of the virtual driver. The virtual driver is only needed when you want more controllers than Windows allows.</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2 data-i18n="driver.addTitle">Hidden controllers</h2>
+          <span class="tag" id="driverLive"></span>
+        </div>
+        <p class="sub" data-i18n="driver.addText">One controller per pad. A pad can only feed one controller at a time.</p>
+        <div class="driver-state" id="driverState"></div>
+        <div class="drv-list" id="driverList"></div>
+        <div class="actions">
+          <button class="btn ghost" data-act="driverAdd"><i data-icon="plus"></i><span data-i18n="driver.add">Add controller</span></button>
+        </div>
+        <div class="drv-start">
+          <button class="btn primary" id="driverStartBtn" data-act="driverStart"><i data-icon="play"></i><span data-i18n="driver.start">Start</span></button>
+          <button class="btn ghost" id="driverStopBtn" data-act="driverStop"><i data-icon="stop"></i><span data-i18n="driver.stop">Stop</span></button>
+        </div>
+      </div>
+
+      <div class="card" id="drvEditCard" hidden>
+        <div class="card-head"><h2 id="drvEditTitle"></h2></div>
+        <p class="sub" id="drvEditSub" style="margin:-6px 0 12px"></p>
+        <div class="live-split">
+          <div class="pad-view" id="drvPadView"></div>
+          <div class="live-grid" id="drvLiveGrid"></div>
+        </div>
+        <div class="map-group-title" data-i18n="driver.mapTitle">What this controller sends</div>
+        <div id="drvMapGrid" class="map-grid"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2 data-i18n="driver.filesTitle">Hook files</h2></div>
+        <div class="kv" id="driverFiles"></div>
+        <div class="actions">
+          <button class="btn ghost" data-act="driverFolder"><i data-icon="folder"></i><span data-i18n="driver.openFolder">Open DLL folder</span></button>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-guide">
+      <header class="page-head"><div><h1 data-i18n="guide.title">Guide</h1><p class="sub" data-i18n="guide.sub">From a plugged-in pad to a game that just works. Four steps, no settings to guess.</p></div></header>
+      <div class="card">
+        <div class="guide-step">
+          <div class="guide-num">1</div>
+          <div class="guide-body">
+            <h3 data-i18n="guide.s1t">Make a profile</h3>
+            <p data-i18n="guide.s1p">On the dashboard press New profile and pick the game's .exe. Every game gets its own profile, so nothing is shared by accident.</p>
+            <div class="guide-shot"><img src="help-1.png" data-shot="1" draggable="false" alt=""></div>
+          </div>
+        </div>
+        <div class="guide-step">
+          <div class="guide-num">2</div>
+          <div class="guide-body">
+            <h3 data-i18n="guide.s2t">Say which pad plays</h3>
+            <p data-i18n="guide.s2p">In the slot map the first row is the slot the game reads as controller 1. Pick your pad there, then the next one on the row below.</p>
+            <div class="guide-shot"><img src="help-2.png" data-shot="2" draggable="false" alt=""></div>
+          </div>
+        </div>
+        <div class="guide-step">
+          <div class="guide-num">3</div>
+          <div class="guide-body">
+            <h3 data-i18n="guide.s3t">Check the buttons</h3>
+            <p data-i18n="guide.s3p">Open Mapping and press a button on the pad — the diagram lights up. If a button is in the wrong place, click Learn on its row and press the real button once.</p>
+            <div class="guide-shot"><img src="help-3.png" data-shot="3" draggable="false" alt=""></div>
+          </div>
+        </div>
+        <div class="guide-step">
+          <div class="guide-num">4</div>
+          <div class="guide-body">
+            <h3 data-i18n="guide.s4t">Copy into the game and launch</h3>
+            <p data-i18n="guide.s4p">Press Copy to game: the right DLLs for the game's bit-ness and your mapping go into its folder. Launch from here or from your own shortcut — the profile travels with the files.</p>
+            <div class="guide-shot"><img src="help-4.png" data-shot="4" draggable="false" alt=""></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2 data-i18n="guide.moreTitle">Extra controllers</h2></div>
+        <p class="sub" data-i18n="guide.moreText">Windows only has four controller slots. If you need more, open Virtual driver, add a controller per pad and press Start — Mapivo turns them into extra controllers Windows can see.</p>
+        <div class="actions"><button class="btn ghost" data-goto="driver"><span data-i18n="guide.openDriver">Open virtual driver</span></button></div>
+      </div>
+    </section>
+
+    <section class="page" id="page-settings">
+      <header class="page-head"><div><h1 data-i18n="settings.title">Settings</h1><p class="sub" data-i18n="settings.sub">App-wide preferences. Profiles still stay per game.</p></div></header>
+      <div class="card">
+        <div class="field-row switch-row"><label data-i18n="settings.autoLaunch">Auto-launch selected game on open</label>
+          <label class="switch"><input type="checkbox" id="setAutoLaunch"><span></span></label></div>
+        <div class="field-row switch-row"><label data-i18n="settings.startMin">Start minimized</label>
+          <label class="switch"><input type="checkbox" id="setStartMin"><span></span></label></div>
+        <div class="field-row"><label data-i18n="settings.language">Language</label>
+          <select id="setLanguage" class="lang-select">
+            <option value="en">English</option>
+            <option value="fa">فارسی</option>
+          </select></div>
+        <div class="field-row"><label data-i18n="settings.dllFolder">DLL folder</label>
+          <div class="inline"><input type="text" id="setDllFolder" readonly><button class="btn ghost" data-act="browseDll"><i data-icon="folder"></i></button></div></div>
+        <div class="actions"><button class="btn primary" data-act="saveSettings"><i data-icon="save"></i><span data-i18n="settings.save">Save settings</span></button></div>
+      </div>
+    </section>
+
+    <section class="page" id="page-logs">
+      <header class="page-head">
+        <div><h1 data-i18n="logs.title">Logs</h1><p class="sub" data-i18n="logs.sub">Runtime events from the app and the hook.</p></div>
+        <div class="inline">
+          <button class="btn ghost" data-act="refreshLogs"><i data-icon="refresh"></i><span data-i18n="logs.refresh">Refresh</span></button>
+          <button class="btn ghost" data-act="copyLogs"><i data-icon="save"></i><span data-i18n="logs.copy">Copy</span></button>
+          <button class="btn ghost" data-act="clearLogs"><i data-icon="trash"></i><span data-i18n="logs.clear">Clear view</span></button>
+        </div>
+      </header>
+      <div class="logerr" id="logErr" hidden></div>
+      <div class="logbox" id="logBox"></div>
+    </section>
+  </main>
+</div>
+
+<div class="modal" id="copyWarnModal" hidden>
+  <div class="modal-card copy-warn">
+    <div class="modal-head">
+      <h2 data-i18n="copyWarn.title">Copy to game</h2>
+      <button class="modal-x" id="copyWarnX" aria-label="Close">&times;</button>
+    </div>
+    <p class="copy-warn-ask" id="copyWarnAsk" data-i18n="copyWarn.detected">Mapivo detected online or strong anti-cheat in this game folder:</p>
+    <div class="copy-warn-detail" id="copyWarnDetail" hidden>
+      <ul class="copy-warn-reasons" id="copyWarnReasons"></ul>
+      <ul class="copy-warn-list">
+        <li data-i18n="copyWarn.l1">Kernel anti-cheat may refuse to launch the game.</li>
+        <li data-i18n="copyWarn.l2">In rare cases your account may be flagged or banned.</li>
+        <li data-i18n="copyWarn.l3">Offline and single-player games have no risk.</li>
+      </ul>
+      <p class="copy-warn-alt" data-i18n="copyWarn.alt">For online games use the Virtual driver instead — it puts no DLL in the game folder.</p>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="copyWarnCancel" data-i18n="common.cancel">Cancel</button>
+      <button class="btn danger" id="copyWarnOk" hidden data-i18n="copyWarn.proceed">I understand, copy anyway</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="learnModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2 id="learnTitle">Bind a control</h2>
+      <button class="modal-x" id="learnClose" aria-label="Cancel">×</button>
+    </div>
+    <p class="modal-sub" id="learnSub"></p>
+    <div class="modal-pad">
+      <img class="pad-img" id="learnPadImg" src="pad.png" alt="Xbox 360 controller">
+      <i class="pad-ov target" id="learnTargetMark"></i>
+    </div>
+    <div class="modal-wait" id="learnWait"><span class="pulse"></span><span data-i18n="mapping.waitPress">Press a button on the pad…</span></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="learnCancelBtn" data-i18n="common.cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toasts"></div>
+<script src="i18n.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

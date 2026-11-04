@@ -1,0 +1,16 @@
+target/
+out/
+bin/
+obj/
+settings.json
+Profiles/
+logs/
+*.user
+*.suo
+*.pdb
+*.lib
+.zig-cache/
+.zig-global/
+tools/test-dll/out/
+.impeccable/
+.vs/

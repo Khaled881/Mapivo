@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Mapivo</AssemblyName>
+    <RootNamespace>Mapivo.App</RootNamespace>
+    <ApplicationIcon>mapivo.ico</ApplicationIcon>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Mapivo.Core\Mapivo.Core.csproj" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3296.44" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="web\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <Resource Include="mapivo.ico" />
+  </ItemGroup>
+
+  <Target Name="CopyHookDlls" AfterTargets="Build"
+          Inputs="$(MSBuildThisFileDirectory)..\..\out\DLL\**\*.dll"
+          Outputs="$(OutDir)DLL\x86\xinput1_3.dll;$(OutDir)DLL\x64\xinput1_3.dll">
+    <ItemGroup>
+      <HookDlls Include="$(MSBuildThisFileDirectory)..\..\out\DLL\**\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(HookDlls)"
+          DestinationFiles="@(HookDlls->'$(OutDir)DLL\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(HookDlls)' != ''" />
+  </Target>
+
+</Project>
