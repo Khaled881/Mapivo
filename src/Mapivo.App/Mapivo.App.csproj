@@ -34,4 +34,16 @@
           Condition="'@(HookDlls)' != ''" />
   </Target>
 
+
+  <Target Name="CopyHookDllsToPublish" AfterTargets="Publish"
+          Condition="'$(PublishDir)' != ''">
+    <ItemGroup>
+      <HookDllsPublish Include="$(MSBuildThisFileDirectory)..\..\out\DLL\**\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(HookDllsPublish)"
+          DestinationFiles="@(HookDllsPublish->'$(PublishDir)DLL\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(HookDllsPublish)' != ''" />
+  </Target>
+
 </Project>

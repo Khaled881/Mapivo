@@ -13,9 +13,12 @@ profiles, button mapping, deadzones and vibration.
 
 ## Install
 
-Download **`Mapivo-Setup-1.0.0-x64.exe`** from the [Releases](../../releases) page and run it.
+Download **`Mapivo-Setup-1.0.0.exe`** from the [Releases](../../releases) page and run it.
+
+- One setup for both **x64** and **ARM64** Windows; it picks the right build automatically.
 
 - The installer asks for your language first (English / فارسی), then Next → Next.
+- **No administrator rights needed**: it installs per-user into `%LOCALAPPDATA%\Programs\Mapivo`.
 - You can choose any install folder.
 - Optional desktop shortcut and a Start Menu shortcut are created.
 - If **WebView2 Runtime** is missing it is downloaded and installed automatically.
@@ -55,7 +58,7 @@ Download **`Mapivo-Setup-1.0.0-x64.exe`** from the [Releases](../../releases) pa
 
 | Requirement | Needed for |
 |---|---|
-| Windows 10/11 (x64) | Everything |
+| Windows 10/11 (x64 or ARM64) | Everything |
 | [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) | The UI (installed automatically by the installer if missing) |
 | [ViGEmBus](https://github.com/nefarius/ViGEmBus/releases) | Virtual driver mode only |
 
@@ -66,7 +69,8 @@ Download **`Mapivo-Setup-1.0.0-x64.exe`** from the [Releases](../../releases) pa
 ## Build
 
 ```bash
-dotnet publish src/Mapivo.App/Mapivo.App.csproj -c Release -r win-x64 --self-contained true -o out/publish
+dotnet publish src/Mapivo.App/Mapivo.App.csproj -c Release -r win-x64   --self-contained true -o out/publish/x64
+dotnet publish src/Mapivo.App/Mapivo.App.csproj -c Release -r win-arm64 --self-contained true -o out/publish/arm64
 ```
 
 The hook DLLs are compiled separately with Zig:
@@ -84,7 +88,7 @@ Then build the installer with [Inno Setup](https://jrsoftware.org/isinfo.php) 7:
 "C:\Program Files\Inno Setup 7\ISCC.exe" installer\Mapivo.iss
 ```
 
-The setup file is written to `out/installer/Mapivo-Setup-1.0.0-x64.exe`.
+The setup file is written to `out/installer/Mapivo-Setup-1.0.0.exe` and contains both the x64 and ARM64 builds.
 
 ---
 

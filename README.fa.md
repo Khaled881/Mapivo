@@ -13,8 +13,10 @@
 
 ## نصب
 
-فایل **`Mapivo-Setup-1.0.0-x64.exe`** را از بخش [Releases](../../releases) دانلود و اجرا کنید.
+فایل **`Mapivo-Setup-1.0.0.exe`** را از بخش [Releases](../../releases) دانلود و اجرا کنید.
 
+- یک ستاپ برای هر دو ویندوز **x64** و **ARM64**؛ خودش نسخهٔ درست را انتخاب می‌کند.
+- **نیازی به دسترسی ادمین نیست**: به‌صورت per-user در `%LOCALAPPDATA%\Programs\Mapivo` نصب می‌شود.
 - اینستالر اول زبان را می‌پرسد (English / فارسی)، بعد Next و Next.
 - مسیر نصب را خودتان انتخاب می‌کنید.
 - شورتکات دسکتاپ (اختیاری) و شورتکات منوی استارت ساخته می‌شود.
@@ -55,7 +57,7 @@
 
 | پیش‌نیاز | برای چه |
 |---|---|
-| ویندوز ۱۰/۱۱ (۶۴ بیتی) | همه چیز |
+| ویندوز ۱۰/۱۱ (x64 یا ARM64) | همه چیز |
 | [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) | رابط کاربری (اگر نباشد اینستالر خودکار نصبش می‌کند) |
 | [ViGEmBus](https://github.com/nefarius/ViGEmBus/releases) | فقط حالت درایور مجازی |
 
@@ -66,7 +68,8 @@
 ## ساخت
 
 ```bash
-dotnet publish src/Mapivo.App/Mapivo.App.csproj -c Release -r win-x64 --self-contained true -o out/publish
+dotnet publish src/Mapivo.App/Mapivo.App.csproj -c Release -r win-x64   --self-contained true -o out/publish/x64
+dotnet publish src/Mapivo.App/Mapivo.App.csproj -c Release -r win-arm64 --self-contained true -o out/publish/arm64
 ```
 
 DLLهای هوک جدا با Zig ساخته می‌شوند:
@@ -84,7 +87,7 @@ tools/build-hook.bat
 "C:\Program Files\Inno Setup 7\ISCC.exe" installer\Mapivo.iss
 ```
 
-فایل ستاپ در `out/installer/Mapivo-Setup-1.0.0-x64.exe` ساخته می‌شود.
+فایل ستاپ در `out/installer/Mapivo-Setup-1.0.0.exe` ساخته می‌شود و شامل هر دو نسخهٔ x64 و ARM64 است.
 
 ---
 

@@ -9,7 +9,7 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
-DefaultDirName={autopf}\{#AppName}
+DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
@@ -18,10 +18,10 @@ SolidCompression=yes
 WizardStyle=modern
 SetupIconFile=..\src\Mapivo.App\mapivo.ico
 OutputDir=..\out\installer
-OutputBaseFilename=Mapivo-Setup-{#AppVersion}-x64
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
-PrivilegesRequired=admin
+OutputBaseFilename=Mapivo-Setup-{#AppVersion}
+ArchitecturesInstallIn64BitMode=x64compatible or arm64
+ArchitecturesAllowed=x64compatible arm64
+PrivilegesRequired=lowest
 MinVersion=10.0
 ShowLanguageDialog=yes
 UsePreviousLanguage=no
@@ -34,11 +34,13 @@ Name: "farsi"; MessagesFile: "Farsi.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [InstallDelete]
-Type: filesandordirs; Name: "{app}\web"
 Type: filesandordirs; Name: "{app}\DLL"
+Type: filesandordirs; Name: "{app}\web"
+Type: filesandordirs; Name: "{app}\runtimes"
 
 [Files]
-Source: "..\out\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\out\publish\x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs solidbreak; Check: PreferX64Files
+Source: "..\out\publish\arm64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: PreferArm64Files
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"
@@ -58,6 +60,16 @@ farsi.UninstallDoneTitle=حذف کامل شد
 farsi.UninstallDoneText=مپایو یکسره از این کامپیوتر حذف شد.
 
 [Code]
+function PreferArm64Files: Boolean;
+begin
+  Result := IsArm64;
+end;
+
+function PreferX64Files: Boolean;
+begin
+  Result := not PreferArm64Files;
+end;
+
 const
   WebView2Key = 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
   WebView2KeyUser = 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
