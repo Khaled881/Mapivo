@@ -236,6 +236,10 @@ h2{margin:0;font-size:13px;font-weight:600;letter-spacing:.2px;color:var(--fg-di
 }
 .field-row input[type=text]:focus{border-color:var(--accent-dim)}
 .note{color:var(--fg-faint);font-size:11.5px;margin-left:6px}
+.update-status{font-size:12.5px;color:var(--fg-dim);padding:10px 0 2px}
+.update-status[data-state=new]{color:var(--accent)}
+.update-status[data-state=latest]{color:var(--ok)}
+.update-status[data-state=err]{color:var(--bad)}
 .switch-row label:first-child{flex:1}
 .kv{margin-top:6px;display:grid;gap:7px}
 .kv div{display:flex;justify-content:space-between;gap:14px;font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--line)}
@@ -257,7 +261,11 @@ h2{margin:0;font-size:13px;font-weight:600;letter-spacing:.2px;color:var(--fg-di
   position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;
   background:var(--accent);opacity:0;transition:opacity .07s,transform .07s;
   transform:scale(.6);pointer-events:none;mix-blend-mode:normal}
-.pad-ov.on{opacity:.85;transform:scale(1)}
+.pad-ov.on{opacity:1;transform:scale(1.18);background:#7cbcff;box-shadow:0 0 0 2px rgba(124,188,255,.6),0 0 16px 5px rgba(76,154,255,.8)}
+/* Shoulder buttons sit at the very top of the artwork; a faint badge keeps
+   them visible even while unpressed, per the request to always show LB/RB. */
+.pad-ov.sh{opacity:.35;transform:scale(.8)}
+.pad-ov.sh.on{opacity:1;transform:scale(1.15);background:#7cbcff;box-shadow:0 0 0 2px rgba(124,188,255,.6),0 0 16px 5px rgba(76,154,255,.8)}
 .pad-dot{
   position:absolute;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;
   background:var(--accent);box-shadow:0 0 0 2px rgba(15,17,21,.8);pointer-events:none;
@@ -408,11 +416,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
   border:2px solid var(--accent);background:rgba(78,158,255,.22);
   box-shadow:0 0 0 6px rgba(78,158,255,.14);animation:pulseMark 1.3s ease-in-out infinite}
 @keyframes pulseMark{0%,100%{transform:scale(1);opacity:.9}50%{transform:scale(1.22);opacity:.55}}
+.learn-arrows{position:absolute;inset:0;pointer-events:none}
+.learn-arrow{position:absolute;transform:translate(-50%,-50%);font-size:17px;line-height:1;
+  color:var(--fg-faint);opacity:.55;transition:color .1s,opacity .1s}
+.learn-arrow.on{color:var(--accent);opacity:1;text-shadow:0 0 8px rgba(78,158,255,.6)}
 .modal-wait{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:6px;
   font-size:12.5px;color:var(--fg-dim)}
 .modal-wait .pulse{width:8px;height:8px;border-radius:50%;background:var(--accent);
   animation:pulseMark 1s ease-in-out infinite}
-.modal-actions{display:flex;justify-content:flex-end;margin-top:16px}
+.modal-actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
 
 /* ---- RTL (Persian) ---- */
 html[dir="rtl"] body{font-family:"Vazirmatn","Segoe UI","Tahoma",sans-serif}

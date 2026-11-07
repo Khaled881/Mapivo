@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 
 namespace Mapivo.Core;
@@ -9,6 +9,7 @@ public sealed class PadFrame
     public bool Connected { get; set; }
     public string? Error { get; set; }
     public int LX, LY, RX, RY, LT, RT;
+    public bool HasPov { get; set; }
     public List<int> Buttons { get; } = new();
     public List<int> RawButtons { get; } = new();
     public Dictionary<string, string> Map { get; set; } = new();
@@ -454,7 +455,7 @@ public static class PadReader
             _ranges[GuidRz] = AxisRange(_axes.TryGetValue(GuidRz, out var rzofs) ? rzofs : -1);
 
             IntPtr hwnd = Window;
-            _setCoop(_vt, hwnd, 0x2 | 0x4);   // DISCL_BACKGROUND | DISCL_NONEXCLUSIVE
+            _setCoop(_vt, hwnd, 0x8 | 0x2);   // DISCL_BACKGROUND | DISCL_NONEXCLUSIVE
             if (_acquire(_vt) != 0) { Error = "pad busy (not acquired)"; Dead = true; return this; }
 
             var caps = Marshal.AllocHGlobal(44);
@@ -620,6 +621,7 @@ public static class PadReader
 
                 if (_pov >= 0)
                 {
+                    f.HasPov = true;
                     uint pov = (uint)Marshal.ReadInt32(buf, _pov);
                     if (pov != 0xFFFFFFFF)
                     {

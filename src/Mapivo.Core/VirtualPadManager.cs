@@ -1,4 +1,4 @@
-﻿
+
 using System;
 using System.Collections.Generic;
 using Nefarius.ViGEm.Client;
@@ -36,10 +36,13 @@ public static class VirtualPadManager
         public byte VibrateLeft, VibrateRight;
 
         internal IXbox360Controller? Target;
+        internal bool RumbleActive;
+        internal long KickUntil;
         internal ushort Buttons;
         internal short LX, LY, RX, RY;
         internal byte LT, RT;
         internal string Sent = "";
+        internal long SentAt;
     }
 
     static ViGEmClient? _client;
@@ -202,6 +205,20 @@ public static class VirtualPadManager
         if (s == null || token.Length == 0) return;
         byte l = s.VibrateLeft, r = s.VibrateRight;
 
+        // A game that drives only the small motor would otherwise leave the
+        // big one at zero, and the small motor on this pad is too weak to
+        // overcome stiction, so the pad "tries" but never spins. Mirror the
+        // weak channel onto the big motor, and give every idle->active
+        // transition a short full-power kick so the motor breaks free.
+        bool active = l > 0 || r > 0;
+        long now = Environment.TickCount64;
+        if (active && !s.RumbleActive) { s.RumbleActive = true; s.KickUntil = now + 90; }
+        if (!active) s.RumbleActive = false;
+        bool kick = active && now < s.KickUntil;
+        byte el = kick ? (byte)255 : l;
+        byte er = kick ? (byte)255 : r;
+        if (!kick) el = Math.Max(el, er);
+
         // DualSense halts inside its travel that follow the finger, scaled by the
         // game's rumble. No PC game asks for this, so it is derived here; a pad
         // that cannot do it simply ignores the blocks.
@@ -211,22 +228,28 @@ public static class VirtualPadManager
         TriggerEffect(rtEffect, srcRT, bump);
         TriggerEffect(ltEffect, srcLT, bump);
 
-        string key = l + ":" + r + ":" + srcLT + ":" + srcRT;
-        if (key == s.Sent) return;
+        // Many pads (notably the ShanWan PS3 clones) treat each output
+        // report as a one-shot: the motor starts and then coasts to a stop
+        // unless the report is re-sent. A constant game rumble therefore
+        // looked like "the motor tries but cannot spin". Refresh while an
+        // effect is active instead of only on value change.
+        string key = el + ":" + er + ":" + srcLT + ":" + srcRT;
+        if (key == s.Sent && !(active && now - s.SentAt >= 60)) return;
         s.Sent = key;
+        s.SentAt = now;
         try
         {
             if (token[0] == 'x' || token[0] == 'X')
             {
                 if (int.TryParse(token.AsSpan(1), out var x) && XInputApi.IsConnected(x))
-                    XInputApi.SetVibration(x, (ushort)(l * 257), (ushort)(r * 257));
+                    XInputApi.SetVibration(x, (ushort)(el * 257), (ushort)(er * 257));
             }
-            else if (!HidRumble.Set(token, l, r, rtEffect, ltEffect))
+            else if (!HidRumble.Set(token, el, er, rtEffect, ltEffect))
             {
                 // No HID output report: fall back to the DirectInput effect so
                 // the game's rumble still reaches the pad. One axis only, so
                 // the stronger motor wins.
-                int mag = Math.Max(l, r) * 39;
+                int mag = Math.Max(el, er) * 39;
                 PadReader.RumbleFallback(token, mag);
             }
         }

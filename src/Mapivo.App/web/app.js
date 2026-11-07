@@ -210,7 +210,7 @@ function renderDrvEditBox() {
   card.hidden = false;
   $('#drvEditTitle').textContent = T('driver.editTitle', { n: r.index + 1 });
   $('#drvEditSub').textContent = T('driver.editSub');
-  const names = state.buttonNames && state.buttonNames.length ? state.buttonNames : TARGET_KEYS_LIST;
+  const names = srcOptionNames();
   const map = r.map || {};
   const targets = state.mappingTargets && state.mappingTargets.length ? state.mappingTargets : TARGET_KEYS_LIST;
   const srcLabel = n => TARGET_LABEL[n] || BUTTON_WORD[n] || SRC_LABEL[n] || n;
@@ -522,6 +522,72 @@ function renderSettings() {
   $('#setStartMin').checked = !!state.settings.startMinimized;
   $('#setDllFolder').value = state.settings.dllFolder || 'DLL';
   $('#setLanguage').value = state.settings.language || getMapivoLang() || 'en';
+  const v = state.settings.version || '1.0.1';
+  if ($('#setVersion')) $('#setVersion').textContent = 'v' + v;
+  if ($('#setVersionText')) $('#setVersionText').textContent = v;
+  if ($('#railVersion')) $('#railVersion').textContent = 'v' + v;
+}
+
+function showUpdateModal(info) {
+  const text = T('update.foundSub', { latest: info.latest, current: info.current });
+  $('#updateModalText').textContent = text;
+  $('#updateDownloadBtn').hidden = !info.setupUrl;
+  $('#updateModal').hidden = false;
+}
+
+function closeUpdateModal() { $('#updateModal').hidden = true; }
+
+document.addEventListener('DOMContentLoaded', () => {
+  $('#updateModalX')?.addEventListener('click', closeUpdateModal);
+  $('#updateLaterBtn')?.addEventListener('click', closeUpdateModal);
+  $('#updateDownloadBtn')?.addEventListener('click', downloadUpdate);
+});
+
+let updateInfo = null;
+
+// Runs once at startup without touching the Settings card: if a newer build
+// exists it offers Download/Later; a failed check stays silent.
+async function autoUpdateCheck() {
+  const res = await call('checkUpdate');
+  if (!res || res.ok === false || !res.isNewer) return;
+  updateInfo = res;
+  showUpdateModal(res);
+}
+
+// Downloads the setup, hands off to it and quits so it can replace the files;
+// the installer reopens Mapivo afterwards.
+async function downloadUpdate() {
+  if (!updateInfo || !updateInfo.setupUrl) return;
+  const btn = $('#updateDownloadBtn');
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = T('update.downloading');
+  const res = await call('installUpdate', { url: updateInfo.setupUrl });
+  if (!res || res.ok === false) {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+async function checkUpdate() {
+  const st = $('#updateStatus');
+  st.dataset.state = 'checking';
+  st.textContent = T('update.checking');
+  const res = await call('checkUpdate');
+  if (!res) { st.dataset.state = 'err'; st.textContent = T('update.failed'); return; }
+  if (res.ok === false) { st.dataset.state = 'err'; st.textContent = res.message || T('update.failed'); return; }
+  updateInfo = res;
+  if (res.isNewer) {
+    st.dataset.state = 'new';
+    st.textContent = T('update.available', { latest: res.latest, current: res.current });
+    $('#updateInstall').hidden = !res.setupUrl;
+    $('#updateRelease').hidden = !res.releaseUrl;
+  } else {
+    st.dataset.state = 'latest';
+    st.textContent = T('update.upToDate', { current: res.current });
+    $('#updateInstall').hidden = true;
+    $('#updateRelease').hidden = !res.releaseUrl;
+  }
 }
 
 function renderDz() {
@@ -561,6 +627,23 @@ function saveDriverMap() {
     .then(x => { if (x && x.driver) { state.driver = x.driver; renderDriver(); } });
 }
 
+// Sources offered in a mapping dropdown: canonical buttons, axis signs and,
+// on a DirectInput pad, every raw button index. Without the raw buttons and
+// the axis entries a trigger that the device reports as b6/b7 (or as a slider)
+// never appeared in the list, so it could not be bound.
+function srcOptionNames() {
+  const base = (state.buttonNames && state.buttonNames.length)
+    ? state.buttonNames.slice() : TARGET_KEYS_LIST.slice();
+  const axes = (state.axisSources && state.axisSources.length)
+    ? state.axisSources : ['lt', 'rt', 'lx+', 'lx-', 'ly+', 'ly-', 'rx+', 'rx-', 'ry+', 'ry-'];
+  axes.forEach(n => { if (!base.includes(n)) base.push(n); });
+  const token = (activeCtx().token || '');
+  if (token && token[0] !== 'x') {
+    for (let i = 0; i < 32; i++) { const n = 'b' + i; if (!base.includes(n)) base.push(n); }
+  }
+  return base;
+}
+
 function renderMapping() {
   const slot = currentSlot();
   const pad = state.pads.find(p => p.token === slot.physical);
@@ -573,7 +656,7 @@ function renderMapping() {
   const targets = state.mappingTargets && state.mappingTargets.length ? state.mappingTargets
     : TARGET_KEYS_LIST;
   const map = slot.map || {};
-  const names = state.buttonNames.length ? state.buttonNames : TARGET_KEYS_LIST;
+  const names = srcOptionNames();
   const token = slot.physical;
   // Show a human name for a source: a learned label, the device's own mapping
   // (so b2 reads "A" on a pad whose A is HID button 2), then a generic name.
@@ -640,15 +723,15 @@ const prevPressed = new Set();
 // Where each control sits on the pad diagram, in % of the image, so the popup
 // can point at the control being bound.
 const LEARN_POS = {
-  a: [76.5, 58], b: [85.1, 49.5], x: [69.1, 49.5], y: [77.6, 40.6],
-  lb: [20, 24], rb: [79, 24], back: [39.4, 52], start: [60.9, 51.1],
-  l3: [40.4, 49.8], r3: [60.1, 49.9],
-  up: [36.7, 63.5], down: [36.5, 77.4], left: [32.3, 70.4], right: [41.1, 70.4],
+  a: [77.1, 58.5], b: [84.9, 49.1], x: [70, 50.3], y: [77.8, 40.8],
+  lb: [21.9, 22], rb: [78, 22], back: [38.5, 50], start: [60.5, 50.5],
+  l3: [21.86, 53.82], r3: [62.67, 74.06],
+  up: [35.9, 65.1], down: [35.9, 74.8], left: [31.9, 70], right: [40, 70],
   lt: [25.1, 9.4], rt: [74.8, 9.4],
-  lu: [40.4, 49.8], ld: [40.4, 49.8], ll: [40.4, 49.8], lr: [40.4, 49.8],
-  lx: [40.4, 49.8], ly: [40.4, 49.8],
-  ru: [60.1, 49.9], rd: [60.1, 49.9], rl: [60.1, 49.9], rr: [60.1, 49.9],
-  rx: [60.1, 49.9], ry: [60.1, 49.9]
+  lu: [21.86, 47.82], ld: [21.86, 59.82], ll: [15.86, 53.82], lr: [27.86, 53.82],
+  lx: [21.86, 53.82], ly: [21.86, 53.82],
+  ru: [62.67, 68.06], rd: [62.67, 80.06], rl: [56.67, 74.06], rr: [68.67, 74.06],
+  rx: [62.67, 74.06], ry: [62.67, 74.06]
 };
 
 function openLearn(t) {
@@ -662,9 +745,39 @@ function openLearn(t) {
   const mark = $('#learnTargetMark');
   mark.style.left = pos[0] + '%';
   mark.style.top = pos[1] + '%';
+  paintLearnArrows(t);
   modal.hidden = false;
   startLive();
   renderMapping();
+}
+
+// Four direction arrows around the stick being mapped, so the user can see
+// which way each binding points. The arrow for the current target is lit.
+const LEARN_STICK = {
+  lu: ['l', 'u'], ld: ['l', 'd'], ll: ['l', 'l'], lr: ['l', 'r'],
+  lx: ['l', ''], ly: ['l', ''],
+  ru: ['r', 'u'], rd: ['r', 'd'], rl: ['r', 'l'], rr: ['r', 'r'],
+  rx: ['r', ''], ry: ['r', '']
+};
+const STICK_CENTER = { l: [21.86, 53.82], r: [62.67, 74.06] };
+function paintLearnArrows(t) {
+  const box = $('#learnArrows');
+  if (!box) return;
+  const conf = LEARN_STICK[t];
+  if (!conf) { box.hidden = true; box.innerHTML = ''; return; }
+  const [side, dir] = conf;
+  const [cx, cy] = STICK_CENTER[side];
+  const off = 5.5;
+  const arrows = [
+    ['u', '\u25B2', cx, cy - off],
+    ['d', '\u25BC', cx, cy + off],
+    ['l', '\u25C0', cx - off, cy],
+    ['r', '\u25B6', cx + off, cy]
+  ];
+  box.hidden = false;
+  box.innerHTML = arrows.map(([k, g, x, y]) =>
+    `<span class="learn-arrow${dir === k ? ' on' : ''}" style="left:${x}%;top:${y}%">${g}</span>`
+  ).join('');
 }
 
 function closeLearn() {
@@ -696,20 +809,20 @@ function setVibInf(on) {
 // highlight dots laid over each control. Coordinates are % of the image.
 const PAD_SVG = `<div class="pad-stage" id="padStage">
   <img class="pad-img" src="pad.png" alt="Xbox 360 controller">
-  <i class="pad-ov" data-b="4"  style="left:20%;top:24%"></i>
-  <i class="pad-ov" data-b="5"  style="left:79%;top:24%"></i>
-  <i class="pad-ov" data-b="6"  style="left:39.4%;top:52%"></i>
-  <i class="pad-ov" data-b="7"  style="left:60.9%;top:51.1%"></i>
-  <i class="pad-ov" data-b="3"  style="left:77.6%;top:40.6%"></i>
-  <i class="pad-ov" data-b="2"  style="left:69.1%;top:49.5%"></i>
-  <i class="pad-ov" data-b="1"  style="left:85.1%;top:49.5%"></i>
-  <i class="pad-ov" data-b="0"  style="left:76.5%;top:58%"></i>
-  <i class="pad-ov" data-b="8"  style="left:40.4%;top:49.8%"></i>
-  <i class="pad-ov" data-b="9"  style="left:60.1%;top:49.9%"></i>
-  <i class="pad-ov" data-b="10" style="left:36.7%;top:63.5%"></i>
-  <i class="pad-ov" data-b="11" style="left:36.5%;top:77.4%"></i>
-  <i class="pad-ov" data-b="12" style="left:32.3%;top:70.4%"></i>
-  <i class="pad-ov" data-b="13" style="left:41.1%;top:70.4%"></i>
+  <i class="pad-ov sh" data-b="4"  style="left:21.9%;top:22%"></i>
+  <i class="pad-ov sh" data-b="5"  style="left:78%;top:22%"></i>
+  <i class="pad-ov" data-b="6"  style="left:38.5%;top:50%"></i>
+  <i class="pad-ov" data-b="7"  style="left:60.5%;top:50.5%"></i>
+  <i class="pad-ov" data-b="3"  style="left:77.8%;top:40.8%"></i>
+  <i class="pad-ov" data-b="2"  style="left:70%;top:50.3%"></i>
+  <i class="pad-ov" data-b="1"  style="left:84.9%;top:49.1%"></i>
+  <i class="pad-ov" data-b="0"  style="left:77.1%;top:58.5%"></i>
+  <i class="pad-ov" data-b="8"  style="left:21.86%;top:53.82%"></i>
+  <i class="pad-ov" data-b="9"  style="left:62.67%;top:74.06%"></i>
+  <i class="pad-ov" data-b="10" style="left:35.9%;top:65.1%"></i>
+  <i class="pad-ov" data-b="11" style="left:35.9%;top:74.8%"></i>
+  <i class="pad-ov" data-b="12" style="left:31.9%;top:70%"></i>
+  <i class="pad-ov" data-b="13" style="left:40%;top:70%"></i>
   <i class="pad-dot" id="padLs"></i>
   <i class="pad-dot" id="padRs"></i>
   <i class="pad-dot trig" id="padLt"></i>
@@ -754,7 +867,7 @@ function activeSources(f) {
   // A pad may report triggers/sticks as buttons rather than axes (SDL's
   // device database says which). Only offer the axis form when the pad's own
   // mapping does not already use a button for it.
-  const map = ctx.map || {};
+  const map = (f && f.map) || ctx.map || {};
   const srcKey = n => { const k = LIVE_KEYS.find(key => map[key] === n); return k || n; };
   const isBtn = k => /^b\d+$/.test(map[k] || '');
   const ax = (name, v, target) => {
@@ -772,9 +885,33 @@ function activeSources(f) {
 
 function canonicalOn(f) {
   const active = activeSources(f);
-  const map = activeCtx().map || {};
+  // Prefer the live frame's merged map (device defaults + saved overrides) so
+  // the pad image lights up even before this slot has anything saved.
+  const map = (f && f.map) || activeCtx().map || {};
+  const isX = !!(activeCtx().token || '').startsWith('x');
+  const hasPov = !!(f && f.hasPov);
+  // On a DirectInput pad with a real POV hat the four D-pad directions come
+  // only from the hat. Raw HID indices 10..13 are Back/Start/L3/R3 on many
+  // pads, so falling back to "b10".."b13" made the analog/Back press light
+  // the D-pad. Never do that when a hat exists.
+  const dpad = new Set(['up', 'down', 'left', 'right']);
+  // Raw HID index 10 is L3 on this pad and also "up" in the canonical order.
+  // A raw fallback must never steal a button that another target already owns
+  // (e.g. map.l3 = "b10"), or clicking the left stick lights the D-pad.
+  const claimed = new Set(Object.values(map).filter(Boolean));
   const out = new Set();
-  LIVE_KEYS.forEach(k => { if (active.has(map[k] || k)) out.add(k); });
+  LIVE_KEYS.forEach(k => {
+    const src = map[k];
+    if (src) {
+      if (active.has(src)) out.add(k);
+    } else if (active.has(k)) {
+      out.add(k);
+    } else if (!isX && !(hasPov && dpad.has(k))
+               && !claimed.has('b' + srcIndex(k))
+               && active.has('b' + srcIndex(k))) {
+      out.add(k);
+    }
+  });
   return out;
 }
 
@@ -796,8 +933,8 @@ function renderPad(f, sel = '#padView') {
   });
   const at = id => $('#' + id, box);
   const ls = at('padLs'), rs = at('padRs'), lt = at('padLt'), rt = at('padRt');
-  if (ls) stickDot(ls, 21.88, 53.79, f.lx, f.ly);
-  if (rs) stickDot(rs, 62.66, 74.07, f.rx, f.ry);
+  if (ls) stickDot(ls, 21.86, 53.82, f.lx, f.ly);
+  if (rs) stickDot(rs, 62.67, 74.06, f.rx, f.ry);
   if (lt) { trigDot(lt, 25.1, 9.4); lt.classList.toggle('on', trigOn(f, 'lt')); }
   if (rt) { trigDot(rt, 74.8, 9.4); rt.classList.toggle('on', trigOn(f, 'rt')); }
   const token = activeCtx().token;
@@ -843,7 +980,7 @@ function renderLive(f, padSel = '#padView', gridSel = '#liveGrid') {
     paintVib(f.vib > 0 ? 'buzz' : (currentSlot().canVib ? 'on' : 'off'));
   // Show the *mapped* output: a target lights up when its mapped physical
   // button is pressed, so learning a binding is visibly confirmed here.
-  const map = activeCtx().map || {};
+  const map = (f && f.map) || activeCtx().map || {};
   const active = activeSources(f);
   const chips = LIVE_KEYS.map(k => {
     const src = map[k] || k;
@@ -1040,6 +1177,7 @@ async function load() {
       setMapivoLang(state.settings.language);
     renderAll();
     renderDriver();
+    autoUpdateCheck();
   } catch (e) { toast(T('err.load', { msg: e }), 'err'); }
 }
 
@@ -1059,6 +1197,11 @@ document.addEventListener('click', e => {
   else if (act === 'deleteProfile') call('deleteProfile');
   else if (act === 'saveSettings') call('saveSettings', { autoLaunchGame: $('#setAutoLaunch').checked, startMinimized: $('#setStartMin').checked, language: getMapivoLang() });
   else if (act === 'browseDll') call('browseDll');
+  else if (act === 'checkUpdate') checkUpdate();
+  else if (act === 'updateInstall') downloadUpdate();
+  else if (act === 'updateRelease') {
+    if (updateInfo && updateInfo.releaseUrl) call('openUrl', { url: updateInfo.releaseUrl });
+  }
   else if (act === 'driverRefresh') call('driver').then(renderDriver);
   else if (act === 'driverFolder') call('openDllFolder').then(renderDriver);
   else if (act === 'profileMenu') toggleProfileMenu();

@@ -129,7 +129,13 @@ sealed class DriverEngine
         }
 
         for (int i = 0; i < Btn.Length; i++)
-            s[i] = Val(frame, r.Map.GetValueOrDefault(Btn[i], Btn[i])) >= 32768 ? 65535 : 0;
+        {
+            // On a pad with a real POV hat the D-pad comes from the hat, never
+            // from a raw-button entry in the device database: those indices are
+            // Start/Back on many pads.
+            if (frame.HasPov && i >= 10) s[i] = frame.Buttons.Contains(i) ? 65535 : 0;
+            else s[i] = Val(frame, r.Map.GetValueOrDefault(Btn[i], Btn[i])) >= 32768 ? 65535 : 0;
+        }
 
         s[14] = Val(frame, r.Map.GetValueOrDefault("lt", "lt")) >= 16000 ? 65535 : 0;
         s[15] = Val(frame, r.Map.GetValueOrDefault("rt", "rt")) >= 16000 ? 65535 : 0;

@@ -23,11 +23,19 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _bridge = new WebBridge(_settings);
+        _bridge.RequestShutdown = () => Dispatcher.Invoke(Close);
         PadReader.Window = new System.Windows.Interop.WindowInteropHelper(this).EnsureHandle();
 
         AppLog.Instance.LineAdded += line => Dispatcher.Invoke(() => PushLog(line));
 
-        Loaded += async (_, _) => await InitAsync();
+        Loaded += async (_, _) =>
+        {
+            // Start minimized when asked: the virtual-pad thread and the
+            // hotplug timer run independently of window visibility, so the
+            // pads keep feeding the game while the window is tucked away.
+            if (_settings.StartMinimized) WindowState = WindowState.Minimized;
+            await InitAsync();
+        };
         Closed += (_, _) =>
         {
             _hotplugTimer?.Stop();
@@ -89,9 +97,13 @@ public partial class MainWindow : Window
 
     void PushState(string json)
     {
-        if (Web.CoreWebView2 == null) return;
-        _ = Web.CoreWebView2.ExecuteScriptAsync(
-            $"window.mapivoState && window.mapivoState({JsonSerializer.Serialize(json)});");
+        try
+        {
+            if (Web.CoreWebView2 == null) return;
+            _ = Web.CoreWebView2.ExecuteScriptAsync(
+                $"window.mapivoState && window.mapivoState({JsonSerializer.Serialize(json)});");
+        }
+        catch { }
     }
 
     void UnregisterDeviceNotifications()
@@ -133,9 +145,13 @@ public partial class MainWindow : Window
     {
         if (_logBacklog.Count >= 2000) _logBacklog.RemoveRange(0, 1000);
         _logBacklog.Add(line);
-        if (Web.CoreWebView2 == null) return;
-        _ = Web.CoreWebView2.ExecuteScriptAsync(
-            $"window.mapivoLog && window.mapivoLog({JsonSerializer.Serialize(line)});");
+        try
+        {
+            if (Web.CoreWebView2 == null) return;
+            _ = Web.CoreWebView2.ExecuteScriptAsync(
+                $"window.mapivoLog && window.mapivoLog({JsonSerializer.Serialize(line)});");
+        }
+        catch { }
     }
 
     async Task InitAsync()
@@ -172,7 +188,7 @@ public partial class MainWindow : Window
         }
     }
 
-    void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    async void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
         string result;
         string id = "";
@@ -183,12 +199,25 @@ public partial class MainWindow : Window
             // Messages without a cmd are not requests (e.g. WebView2 internals).
             if (cmd.Length == 0) return;
             id = req["id"]?.ToString() ?? "";
-            result = cmd switch
+            if (cmd == "act")
             {
-                "load" => _bridge.Load(),
-                "act" => _bridge.Act(req["payload"]?.ToJsonString() ?? "{}"),
-                _ => "{\"ok\":false,\"message\":\"Unknown command\"}"
-            };
+                var payload = req["payload"]?.ToJsonString() ?? "{}";
+                var action = req["payload"]?["action"]?.GetValue<string>() ?? "";
+                // Update check/download do network round-trips; run them off
+                // the UI thread so the window keeps responding instead of
+                // freezing while the installer is fetched.
+                result = action is "checkUpdate" or "installUpdate"
+                    ? await Task.Run(() => _bridge.Act(payload))
+                    : _bridge.Act(payload);
+            }
+            else if (cmd == "load")
+            {
+                result = _bridge.Load();
+            }
+            else
+            {
+                result = "{\"ok\":false,\"message\":\"Unknown command\"}";
+            }
         }
         catch (Exception ex)
         {

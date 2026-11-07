@@ -24,6 +24,7 @@ public sealed class WebBridge
 
     public Action<Action>? OnUi { get; set; }
     public Action<string>? OnLog { get; set; }
+    public Action? RequestShutdown { get; set; }
 
     public sealed class SlotState
     {
@@ -88,6 +89,9 @@ public sealed class WebBridge
                 "deleteProfile" => DeleteProfile(),
                 "saveSettings" => SaveSettings(req),
                 "browseDll" => BrowseDll(),
+                "checkUpdate" => CheckUpdate(),
+                "installUpdate" => InstallUpdate(req),
+                "openUrl" => OpenUrl(req),
                 "live" => Live(req),
                 "driverMap" => DriverMap(req),
                 "saveMap" => SaveMap(req),
@@ -224,6 +228,10 @@ public sealed class WebBridge
         if (_gamePath == null || _profile == null) return Err("Select a game first");
         var dll = _dll ?? GameLauncher.DllFor(_arch, _settings.DllFolderFull, _gamePath);
         ApplySlotsTo(_profile);
+        // Nothing configured means nothing to proxy: never drop hook DLLs and
+        // mapivo.ini into a game folder for an empty profile.
+        if (!GameLauncher.HasPad(_profile))
+            return Err("No controller is mapped to a slot — set one up on the Mapping page first");
         ProfileStore.Save(_profile);
         GameLauncher.WriteGameConfig(_gamePath, _profile);
 
@@ -337,6 +345,8 @@ public sealed class WebBridge
         if (_gamePath == null || _profile == null) return Err("Select a game first");
         var dll = _dll ?? GameLauncher.DllFor(_arch, _settings.DllFolderFull, _gamePath);
         ApplySlotsTo(_profile);
+        if (!GameLauncher.HasPad(_profile))
+            return Err("No controller is mapped to a slot — set one up on the Mapping page first");
         ProfileStore.Save(_profile);
 
         if (!GameLauncher.Install(_gamePath, dll, out var err)) return Err(err);
@@ -388,8 +398,17 @@ public sealed class WebBridge
     JsonObject DeleteProfile()
     {
         if (_profile == null) return Err("Select a profile first");
+        var deletedGame = _profile.GamePath;
         ProfileStore.Delete(_profile);
         AppLog.Instance.Write("Deleted profile " + _profile.DisplayName);
+        // Keep the game listed so the dashboard shows it as "no profile" and
+        // the user can give it a fresh one; only stop it being the active game.
+        if (!string.IsNullOrEmpty(deletedGame)
+            && string.Equals(_settings.LastGame, deletedGame, StringComparison.OrdinalIgnoreCase))
+        {
+            _settings.LastGame = "";
+            _settings.Save();
+        }
         _profile = null;
         _gamePath = null;
         _arch = PeArchitecture.Unknown;
@@ -411,6 +430,66 @@ public sealed class WebBridge
         st["settings"] = SettingsNode();
         st["message"] = "Settings saved";
         return Ok(st);
+    }
+
+    JsonObject CheckUpdate()
+    {
+        try
+        {
+            var info = UpdateChecker.CheckAsync().GetAwaiter().GetResult();
+            return new JsonObject
+            {
+                ["ok"] = true,
+                ["current"] = AppInfo.Version,
+                ["latest"] = info.LatestVersion,
+                ["isNewer"] = info.IsNewer,
+                ["releaseUrl"] = info.ReleaseUrl,
+                ["setupUrl"] = info.SetupUrl ?? "",
+                ["notes"] = info.Notes ?? ""
+            };
+        }
+        catch (Exception ex)
+        {
+            return new JsonObject
+            {
+                ["ok"] = false,
+                ["message"] = "Update check failed: " + ex.Message
+            };
+        }
+    }
+
+    JsonObject InstallUpdate(JsonObject req)
+    {
+        var url = req["url"]?.GetValue<string>() ?? "";
+        if (string.IsNullOrWhiteSpace(url)) return Err("No download url");
+        try
+        {
+            var setup = Updater.DownloadAsync(url).GetAwaiter().GetResult();
+            Updater.LaunchInstallAndRestart(setup);
+            RequestShutdown?.Invoke();
+            return new JsonObject { ["ok"] = true, ["message"] = "Update downloaded. Mapivo will install and reopen." };
+        }
+        catch (Exception ex)
+        {
+            return Err("Update failed: " + ex.Message);
+        }
+    }
+
+    JsonObject OpenUrl(JsonObject req)
+    {
+        var url = req["url"]?.GetValue<string>() ?? "";
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+            return Err("Bad url");
+        try
+        {
+            Process.Start(new ProcessStartInfo { FileName = uri.ToString(), UseShellExecute = true });
+            return Ok(new JsonObject());
+        }
+        catch (Exception ex)
+        {
+            return Err(ex.Message);
+        }
     }
 
     JsonObject BrowseDll()
@@ -446,7 +525,7 @@ public sealed class WebBridge
         }
         var slotIdx = req["slot"]?.GetValue<int>() ?? -1;
         var slotMap = slotIdx >= 0 && slotIdx < _slots.Count
-            ? new Dictionary<string, string>(_slots[slotIdx].Map)
+            ? Merge(PadDb.Defaults(token ?? ""), _slots[slotIdx].Map)
             : new Dictionary<string, string>();
         var frame = PadReader.Read(token ?? "", slotMap);
         var buttons = new JsonArray();
@@ -473,12 +552,13 @@ public sealed class WebBridge
             ["lt"] = frame.LT, ["rt"] = frame.RT,
             ["buttons"] = buttons,
             ["raw"] = raw,
+            ["hasPov"] = frame.HasPov,
             ["names"] = names,
             ["defaults"] = JsonSerializer.SerializeToNode(defaults),
             ["targets"] = new JsonArray(Targets.Select(n => (JsonNode)n!).ToArray()),
-            ["map"] = new JsonObject(_slots.Count > slotIdx && slotIdx >= 0
-                ? _slots[slotIdx].Map.Select(kv => new KeyValuePair<string, JsonNode?>(kv.Key, kv.Value))
-                : Enumerable.Empty<KeyValuePair<string, JsonNode?>>())
+            ["map"] = JsonSerializer.SerializeToNode(slotIdx >= 0 && slotIdx < _slots.Count
+                ? Merge(token != null ? PadDb.Defaults(token) : new Dictionary<string, string>(), _slots[slotIdx].Map)
+                : new Dictionary<string, string>())
         };
     }
 
@@ -526,10 +606,11 @@ public sealed class WebBridge
             ["lt"] = frame.LT, ["rt"] = frame.RT,
             ["buttons"] = buttons,
             ["raw"] = raw,
+            ["hasPov"] = frame.HasPov,
             ["names"] = names,
             ["defaults"] = JsonSerializer.SerializeToNode(PadDb.Defaults(row.Token)),
             ["targets"] = new JsonArray(Targets.Select(n => (JsonNode)n!).ToArray()),
-            ["map"] = new JsonObject(row.Map.ToDictionary(kv => kv.Key, kv => (JsonNode?)kv.Value))
+            ["map"] = JsonSerializer.SerializeToNode(Merge(PadDb.Defaults(row.Token), row.Map))
         };
     }
 
@@ -884,6 +965,16 @@ public sealed class WebBridge
         _slots = next;
     }
 
+    // Device defaults first, the user's saved entries win. The UI and the
+    // driver must see the same map the hook will resolve.
+    static Dictionary<string, string> Merge(Dictionary<string, string> defaults, Dictionary<string, string> overrides)
+    {
+        var map = new Dictionary<string, string>(defaults);
+        foreach (var kv in overrides)
+            if (!string.IsNullOrEmpty(kv.Value)) map[kv.Key] = kv.Value;
+        return map;
+    }
+
     void ApplySlotsTo(GameProfile p)
     {
         p.Bindings.Clear();
@@ -920,7 +1011,7 @@ public sealed class WebBridge
         {
             var s = _slots[i];
             var map = new JsonObject();
-            foreach (var kv in s.Map) map[kv.Key] = kv.Value;
+            foreach (var kv in Merge(PadDb.Defaults(s.Physical), s.Map)) map[kv.Key] = kv.Value;
             var pad = _pads.FirstOrDefault(x => x.Token == s.Physical);
             var saved = _profile?.Bindings.FirstOrDefault(b => b.VirtualSlot == i)?.Name ?? "";
             slots.Add(new JsonObject
@@ -939,7 +1030,15 @@ public sealed class WebBridge
             ["pads"] = pads,
             ["slots"] = slots,
             ["arch"] = _arch.ToString().ToLowerInvariant(),
-            ["dll"] = _dll != null ? Path.GetFileName(Path.GetDirectoryName(_dll)) + "/" + Path.GetFileName(_dll) : null
+            ["dll"] = _dll != null ? Path.GetFileName(Path.GetDirectoryName(_dll)) + "/" + Path.GetFileName(_dll) : null,
+            // Always present so app.js overwrites stale values: after a profile
+            // is deleted the dashboard must fall back to "no profile" instead
+            // of keeping the game it was showing a moment ago.
+            ["game"] = null,
+            ["profile"] = null,
+            ["buttonNames"] = new JsonArray(),
+            ["mappingTargets"] = new JsonArray(),
+            ["axisSources"] = new JsonArray(AxisSources.Select(n => (JsonNode)n!).ToArray())
         };
 
         if (_profile != null)
@@ -1002,7 +1101,8 @@ public sealed class WebBridge
         ["autoLaunchGame"] = _settings.AutoLaunchGame,
         ["startMinimized"] = _settings.StartMinimized,
         ["dllFolder"] = _settings.DllFolder,
-        ["language"] = _settings.Language
+        ["language"] = _settings.Language,
+        ["version"] = AppInfo.Version
     };
 
     // A message belongs at the top level: app.js toasts res.message, and it

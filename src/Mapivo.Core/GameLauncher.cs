@@ -19,6 +19,10 @@ public static class GameLauncher
         return Path.Combine(dir, name);
     }
 
+    /// <summary>True when at least one slot is bound to a physical pad.</summary>
+    public static bool HasPad(GameProfile profile)
+        => profile.Bindings.Any(b => !string.IsNullOrWhiteSpace(b.Physical));
+
     public static void WriteGameConfig(string exePath, GameProfile profile)
     {
         var dir = Path.GetDirectoryName(exePath);
@@ -28,7 +32,10 @@ public static class GameLauncher
         {
             sb.AppendLine($"{b.VirtualSlot}.src={(string.IsNullOrEmpty(b.Physical) ? "-1" : b.Physical)}");
             sb.AppendLine($"{b.VirtualSlot}.vib={(b.VibrationEnabled ? 1 : 0)}");
-            var map = b.Map ?? new Dictionary<string, string>();
+            var map = PadDb.Defaults(b.Physical);
+            foreach (var kv in b.Map ?? new Dictionary<string, string>())
+                if (!string.IsNullOrWhiteSpace(kv.Key) && !string.IsNullOrWhiteSpace(kv.Value))
+                    map[kv.Key] = kv.Value;
             foreach (var kv in map)
                 if (!string.IsNullOrWhiteSpace(kv.Key) && !string.IsNullOrWhiteSpace(kv.Value)
                     && kv.Value != kv.Key)

@@ -95,6 +95,8 @@ static unsigned long long autoTick;  // throttle for device auto-detection
 static int route[4][16];             // target -> raw HID index on a DInput pad
 static int loaded = 0;
 static HMODULE g_self;
+static char g_devName[4][64];   // DirectInput product name per slot
+static int g_devFf[4];           // DirectInput reports force feedback
 
 static void Log(const char *msg);
 static void BuildRoute(int slot);
@@ -130,6 +132,12 @@ static int g_hidIdle[4];                 // 1 once the stop report was sent
 static LONG g_hidPump;                   // watchdog thread started?
 static DWORD g_hidLast[4];               // tick of the last non-zero request
 static DWORD g_hidUntil[4];              // rumble window; zero means the stop report is due
+static DWORD g_hidKickUntil[4];          // idle->active stiction kick ends at this tick
+static DWORD g_hidPulseBase[4];          // anchor tick for the stiction re-kick cycle
+static int g_hidPulse[4];                // 1 = pad needs on/off pulsing (one motor sticks)
+static char g_hidPath[4][260];           // device path the rumble report goes to
+static unsigned g_hidVid[4];             // VID of the HID endpoint this slot opened
+static unsigned g_hidPid[4];             // PID of the HID endpoint this slot opened
 static int g_hidCalls[4];                // first few incoming requests are logged
 static unsigned long long g_devNextTry[4]; // throttles re-enumeration while unplugged
 
@@ -227,7 +235,7 @@ static BOOL CALLBACK LayoutCb(LPCDIDEVICEOBJECTINSTANCEW oi, LPVOID ctx)
     return DIENUM_CONTINUE;
 }
 
-typedef struct { const char *token; GUID guid; int found; } ENUM_CTX;
+typedef struct { const char *token; GUID guid; int found; char name[64]; } ENUM_CTX;
 
 static BOOL CALLBACK EnumCb(LPCDIDEVICEINSTANCEW inst, LPVOID ctx)
 {
@@ -236,6 +244,8 @@ static BOOL CALLBACK EnumCb(LPCDIDEVICEINSTANCEW inst, LPVOID ctx)
     DiTokenOf(&inst->guidProduct, tok);
     if (strcmp(tok, e->token) == 0) {
         e->guid = inst->guidInstance;
+        WideCharToMultiByte(CP_ACP, 0, inst->tszInstanceName, -1,
+                            e->name, 64, NULL, NULL);
         e->found = 1;
         return DIENUM_STOP;
     }
@@ -273,7 +283,11 @@ static void DropDevice(int slot)
 {
     if (g_eff[slot]) { g_eff[slot]->lpVtbl->Release(g_eff[slot]); g_eff[slot] = NULL; }
     if (g_hid[slot] != INVALID_HANDLE_VALUE) { CloseHandle(g_hid[slot]); g_hid[slot] = INVALID_HANDLE_VALUE; }
+    g_hidVid[slot] = 0;
+    g_hidPid[slot] = 0;
     g_hidUntil[slot] = 0;
+    g_hidKickUntil[slot] = 0;
+    g_hidPulse[slot] = 0;
     g_hidIdle[slot] = 1;
     g_hidTried[slot] = 0;
     g_hidLayout[slot] = 0;
@@ -379,6 +393,8 @@ static IDirectInputDevice8W *DiDevice(int slot)
     }
 
     if (g_eff[slot]) { g_eff[slot]->lpVtbl->Release(g_eff[slot]); g_eff[slot] = NULL; }
+    lstrcpynA(g_devName[slot], e.name, sizeof g_devName[slot]);
+    g_devFf[slot] = g_lay[slot].ff;
     g_dev[slot] = dev;
     return dev;
 }
@@ -440,17 +456,13 @@ static int CfgMatch(unsigned vid, unsigned pid, char *out, int cap)
 // Some pads (PS3/Android-mode ones included) report no force feedback through
 // DirectInput but accept a rumble command as a HID output report. Find the
 // device by the vendor/product in the slot token and open it for writing.
-static HANDLE HidOpen(int slot)
+static HANDLE HidOpenPair(int slot, unsigned vid, unsigned pid)
 {
     if (g_hid[slot] != INVALID_HANDLE_VALUE) return g_hid[slot];
     DWORD now = GetTickCount();
     if ((LONG)(now - g_hidRetry[slot]) < 0) return INVALID_HANDLE_VALUE;
     g_hidRetry[slot] = now + 500;   // throttle, but never stop trying
     g_hidTried[slot]++;
-    if (strlen(diToken[slot]) < 6) return INVALID_HANDLE_VALUE;
-
-    unsigned vid = 0, pid = 0;
-    if (sscanf(diToken[slot] + 1, "%x_%x", &vid, &pid) != 2) return INVALID_HANDLE_VALUE;
 
     UINT n = 0;
     GetRawInputDeviceList(NULL, &n, sizeof(RAWINPUTDEVICELIST));
@@ -485,8 +497,10 @@ static HANDLE HidOpen(int slot)
                                NULL, OPEN_EXISTING, 0, NULL);
         if (h == INVALID_HANDLE_VALUE)
             h = CreateFileA(path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-        HeapFree(GetProcessHeap(), 0, path);
-        if (h == INVALID_HANDLE_VALUE) continue;
+        if (h == INVALID_HANDLE_VALUE) {
+            HeapFree(GetProcessHeap(), 0, path);
+            continue;
+        }
 
         HMODULE hid = LoadLibraryA("hid.dll");
         if (hid)
@@ -502,6 +516,7 @@ static HANDLE HidOpen(int slot)
                 {
                     found = h;
                     foundLen = caps.OutputReportByteLength;
+                    lstrcpynA(g_hidPath[slot], path, sizeof g_hidPath[slot]);
                     g_hidBt[slot] = IsBluetoothPathA(path);
                     char cm[96];
                     wsprintfA(cm, "hid caps out=%u in=%u feat=%u",
@@ -511,6 +526,7 @@ static HANDLE HidOpen(int slot)
                 }
             }
         }
+        HeapFree(GetProcessHeap(), 0, path);
         if (found == INVALID_HANDLE_VALUE) CloseHandle(h);
     }
     HeapFree(GetProcessHeap(), 0, list);
@@ -539,6 +555,7 @@ static HANDLE HidOpen(int slot)
                 {
                     found = h;
                     foundLen = caps.OutputReportByteLength;
+                    lstrcpynA(g_hidPath[slot], path, sizeof g_hidPath[slot]);
                     g_hidBt[slot] = IsBluetoothPathA(path);
                     Log("hid rumble available via cfgmgr32");
                 }
@@ -549,8 +566,38 @@ static HANDLE HidOpen(int slot)
 
     g_hid[slot] = found;
     g_hidLen[slot] = foundLen;
+    if (found != INVALID_HANDLE_VALUE) { g_hidVid[slot] = vid; g_hidPid[slot] = pid; }
+    // ShanWan 2563:0575 keeps one motor stuck under a constant drive report
+    // but spins both when the drive is pulsed on/off. Mark it for pulsing.
+    g_hidPulse[slot] = (vid == 0x2563 && pid == 0x0575) ? 1 : 0;
     Log(found != INVALID_HANDLE_VALUE ? "hid rumble available" : "no hid rumble endpoint");
+    if (found != INVALID_HANDLE_VALUE && g_hidPath[slot][0])
+    {
+        char pm[340];
+        wsprintfA(pm, "hid output device slot %d -> %s", slot, g_hidPath[slot]);
+        Log(pm);
+    }
     return found;
+}
+
+// A slot bound to the system XInput driver can still rumble through the same
+// pad's raw HID output endpoint. The 2563:0575 clone exposes both interfaces
+// and only the HID one is able to actually turn its weight motor.
+static HANDLE HidOpenXi(int slot)
+{
+    return HidOpenPair(slot, 0x2563, 0x0575);
+}
+
+static HANDLE HidOpen(int slot)
+{
+    if (g_hid[slot] != INVALID_HANDLE_VALUE) return g_hid[slot];
+    DWORD now = GetTickCount();
+    if ((LONG)(now - g_hidRetry[slot]) < 0) return INVALID_HANDLE_VALUE;
+    if (strlen(diToken[slot]) < 6) return INVALID_HANDLE_VALUE;
+
+    unsigned vid = 0, pid = 0;
+    if (sscanf(diToken[slot] + 1, "%x_%x", &vid, &pid) != 2) return INVALID_HANDLE_VALUE;
+    return HidOpenPair(slot, vid, pid);
 }
 
 static int HidWrite(int slot, const unsigned char *rep, int len)
@@ -565,7 +612,20 @@ static int HidWrite(int slot, const unsigned char *rep, int len)
         if (hid) set = (PFN_HID_SETOUTPUT)GetProcAddress(hid, "HidD_SetOutputReport");
     }
     if (!set) return 0;
-    if (set(g_hid[slot], (PVOID)rep, (ULONG)len)) { g_hidFails[slot] = 0; return 1; }
+    BOOL okw = set(g_hid[slot], (PVOID)rep, (ULONG)len);
+    {
+        static int logged[4];
+        if (logged[slot] < 8)
+        {
+            logged[slot]++;
+            char mm[96];
+            wsprintfA(mm, "hidwrite slot %d len %d ret %d err %lu bytes %02x %02x %02x %02x %02x",
+                      slot, len, (int)okw, GetLastError(),
+                      rep[0], rep[1], rep[2], rep[3], rep[4]);
+            Log(mm);
+        }
+    }
+    if (okw) { g_hidFails[slot] = 0; return 1; }
 
     // One failed report happens while the game re-enumerates the pad. Only a
     // run of failures means the handle is really gone.
@@ -741,8 +801,13 @@ static void SonyWrite(int slot, int kind, int bt, int left, int right)
 // and keep using that one afterwards.
 static void HidSendRaw(int slot, int left, int right)
 {
-    unsigned vid = 0, pid = 0;
-    sscanf(diToken[slot] + 1, "%x_%x", &vid, &pid);
+    // Choose the report shape from the endpoint that was actually opened. A
+    // slot bound to x0 has an empty diToken, so parsing the token here used to
+    // yield vid=0/pid=0 and fall through to the generic probe list, which this
+    // ShanWan clone ignores.
+    unsigned vid = g_hidVid[slot], pid = g_hidPid[slot];
+    if ((!vid || !pid) && diToken[slot][0] == 'j')
+        sscanf(diToken[slot] + 1, "%x_%x", &vid, &pid);
 
     int sony = SonyKind(vid, pid);
     if (sony)
@@ -834,7 +899,7 @@ static DWORD WINAPI HidPump(LPVOID unused)
     (void)unused;
     for (;;)
     {
-        Sleep(50);
+        Sleep(40);
         DWORD now = GetTickCount();
         for (int s = 0; s < 4; s++)
         {
@@ -848,7 +913,21 @@ static DWORD WINAPI HidPump(LPVOID unused)
                 g_hidIdle[s] = 1;
                 continue;
             }
-            HidSendRaw(s, g_hidL[s], g_hidR[s]);
+            int l = g_hidL[s], r = g_hidR[s];
+            if (r > 0) { if (l < r) l = r; }
+            else if (l > 0) r = l;
+            if ((LONG)(now - g_hidKickUntil[s]) < 0)
+            {
+                l = 255; r = 255;
+            }
+            else if (g_hidPulse[s] && l < 255)
+            {
+                // Stiction: the strong motor stalls at low drive. Re-kick it
+                // to full power for 70 ms out of every 200 ms instead of
+                // holding it at a level it cannot turn from.
+                if ((now - g_hidPulseBase[s]) % 200 < 70) { l = 255; r = 255; }
+            }
+            HidSendRaw(s, l, r);
         }
     }
     return 0;
@@ -885,14 +964,34 @@ static void HidSet(int slot, int left, int right, int ms)
         return;
     }
 
+    // Some pads' small motor cannot start on its own (stiction): on every
+    // idle->active transition send a short full-power pulse on both motors,
+    // then settle. The same pulse is repeated by HidPump for its duration.
+    // g_hidIdle starts at 0 in a fresh process, so also treat "no active
+    // window yet" as idle, otherwise the very first rumble skips the kick.
+    int wasIdle = g_hidIdle[slot] || g_hidUntil[slot] == 0;
+
+    if (right > 0) { if (left < right) left = right; }   // mirror weak -> strong
+    else if (left > 0) right = left;                     // mirror strong -> weak
+
     g_hidL[slot] = left;
     g_hidR[slot] = right;
     g_hidLast[slot] = GetTickCount();
     g_hidUntil[slot] = g_hidLast[slot] + (DWORD)(ms > 0 ? ms : 150);
-    g_hidIdle[slot] = 0;
 
     if (HidOpen(slot) == INVALID_HANDLE_VALUE) return;
-    HidSendRaw(slot, left, right);
+
+    // Some pads' small motor cannot start on its own (stiction): on every
+    // idle->active transition send a short full-power pulse on both motors,
+    // then settle. HidPump repeats it until the kick window ends.
+    if (wasIdle)
+    {
+        g_hidKickUntil[slot] = GetTickCount() + 90;
+        g_hidPulseBase[slot] = GetTickCount();
+        g_hidIdle[slot] = 0;
+    }
+    if ((LONG)(GetTickCount() - g_hidKickUntil[slot]) < 0) HidSendRaw(slot, 255, 255);
+    else HidSendRaw(slot, left, right);
 
     if (InterlockedExchange(&g_hidPump, 1) == 0)
         CreateThread(NULL, 0, HidPump, NULL, 0, NULL);
@@ -927,8 +1026,78 @@ static void *RealProc(const char *name)
     return m ? (void *)GetProcAddress(m, name) : NULL;
 }
 
+// The log sits next to the host exe. Several proxy DLLs load into the same
+// game, each with its own copy of this code, so every line is tagged with the
+// name of the DLL that wrote it. The file is wiped when a new game process
+// starts: the pid of the last writer is kept in a sidecar file, guarded by a
+// named mutex so two DLLs cannot wipe each other's fresh log.
+static char g_logTag[32];
+
+static void LogInitOnce(void)
+{
+    static int done;
+    if (done) return;
+    done = 1;
+
+    if (g_self)
+    {
+        char self[MAX_PATH];
+        if (GetModuleFileNameA(g_self, self, MAX_PATH))
+        {
+            char *n = strrchr(self, '\\');
+            n = n ? n + 1 : self;
+            lstrcpynA(g_logTag, n, sizeof g_logTag);
+            char *dot = strrchr(g_logTag, '.');
+            if (dot) *dot = 0;
+        }
+    }
+    if (!g_logTag[0]) strcpy(g_logTag, "?");
+
+    char dir[MAX_PATH];
+    GetModuleFileNameA(NULL, dir, MAX_PATH);
+    char *slash = strrchr(dir, '\\');
+    if (slash) *(slash + 1) = 0;
+
+    HANDLE mtx = CreateMutexA(NULL, FALSE, "Local\\MapivoHookLog");
+    if (mtx) WaitForSingleObject(mtx, 3000);
+
+    char pidPath[MAX_PATH];
+    wsprintfA(pidPath, "%smapivo-hook.pid", dir);
+    DWORD myPid = GetCurrentProcessId();
+    DWORD oldPid = 0;
+    HANDLE ph = CreateFileA(pidPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                            NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (ph != INVALID_HANDLE_VALUE)
+    {
+        DWORD rd = 0;
+        ReadFile(ph, &oldPid, sizeof oldPid, &rd, NULL);
+        CloseHandle(ph);
+    }
+    if (oldPid != myPid)
+    {
+        char logPath[MAX_PATH];
+        wsprintfA(logPath, "%smapivo-hook.log", dir);
+        HANDLE lh = CreateFileA(logPath, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (lh != INVALID_HANDLE_VALUE) CloseHandle(lh);
+        ph = CreateFileA(pidPath, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                         NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (ph != INVALID_HANDLE_VALUE)
+        {
+            DWORD w = 0;
+            WriteFile(ph, &myPid, sizeof myPid, &w, NULL);
+            CloseHandle(ph);
+        }
+    }
+
+    if (mtx) ReleaseMutex(mtx);
+    if (mtx) CloseHandle(mtx);
+}
+
 static void Log(const char *msg)
 {
+    LogInitOnce();
+
     char path[MAX_PATH];
     GetModuleFileNameA(NULL, path, MAX_PATH);
     char *slash = strrchr(path, '\\');
@@ -938,8 +1107,12 @@ static void Log(const char *msg)
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE) return;
     SetFilePointer(h, 0, NULL, FILE_END);
-    char line[512];
-    wsprintfA(line, "[proxy %lu] %s\r\n", GetCurrentProcessId(), msg);
+    char host[MAX_PATH], *hn;
+    GetModuleFileNameA(NULL, host, MAX_PATH);
+    hn = strrchr(host, '\\');
+    hn = hn ? hn + 1 : host;
+    char line[900];
+    wsprintfA(line, "[%s pid %lu host %s] %s\r\n", g_logTag, GetCurrentProcessId(), hn, msg);
     DWORD w;
     WriteFile(h, line, (DWORD)strlen(line), &w, NULL);
     CloseHandle(h);
@@ -1070,6 +1243,38 @@ static DWORD WINAPI InitThread(LPVOID p)
 {
     (void)p;
     if (!loaded) { loaded = 1; ReadConfig(); }
+    if (loaded == 1)
+    {
+        loaded = 2;   // summary once per DLL copy
+        Log("===== mapivo start: slot summary =====");
+        {
+            char hm[MAX_PATH], *hbase, sm[360];
+            GetModuleFileNameA(NULL, hm, MAX_PATH);
+            hbase = strrchr(hm, '\\');
+            hbase = hbase ? hbase + 1 : hm;
+            wsprintfA(sm, "hook dll %s loaded in host %s", g_logTag, hbase);
+            Log(sm);
+        }
+        for (int s = 0; s < 4; s++)
+        {
+            if (!diToken[s][0] && map[s] < 0) continue;
+            if (diToken[s][0]) DiDevice(s);   // resolve name + force feedback now
+            char src[32], m[600];
+            if (diToken[s][0]) lstrcpynA(src, diToken[s], sizeof src);
+            else wsprintfA(src, "x%d", map[s]);
+            int hid = diToken[s][0] ? (HidOpen(s) != INVALID_HANDLE_VALUE)
+                                    : (map[s] >= 0 && HidOpenXi(s) != INVALID_HANDLE_VALUE);
+            const char *dev = (diToken[s][0] && g_devName[s][0]) ? g_devName[s][0] : "-";
+            const char *how = hid ? "HID" : (diToken[s][0] ? "DInput" : "XInput");
+            const char *out = hid
+                ? (g_hidPath[s][0] ? g_hidPath[s] : "HID endpoint")
+                : (diToken[s][0] ? "DInput only (no HID endpoint)"
+                                 : (map[s] >= 0 ? "system XInput driver" : "nothing"));
+            wsprintfA(m, "slot %d src %s vib %d dev %s ffb %d rumble %s -> out %s",
+                      s, src, vib[s], dev, diToken[s][0] ? g_devFf[s] : -1, how, out);
+            Log(m);
+        }
+    }
     return 0;
 }
 
@@ -1089,6 +1294,9 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 
 // Axes are -32768..32767; triggers 0..32767; btn = canonical buttons; phys = raw buttons.
 typedef struct { int lx, ly, rx, ry, lt, rt; unsigned btn; unsigned phys; } RAW;
+// Set in RAW.btn when the pad has a real POV hat, so D-pad directions are
+// read from the hat instead of a raw-button index from the device database.
+#define RAW_POV 0x80000000u
 
 enum { B_A, B_B, B_X, B_Y, B_LB, B_RB, B_BACK, B_START, B_L3, B_R3,
        B_UP, B_DOWN, B_LEFT, B_RIGHT };
@@ -1139,8 +1347,13 @@ static int SourceValue(const RAW *r, const char *name, int slot)
         {
             if (slot >= 0 && slot < 4 && diToken[slot][0])
             {
-                // D-pad directions come from the POV hat, not a HID button,
-                // so they must stay reachable even when the map has an entry.
+                // A pad with a real POV hat always drives its D-pad from the
+                // hat: device-database raw indices for up/down/left/right are
+                // Start/Back on many pads and must not override the hat.
+                if (b >= 10 && b < 14 && (r->btn & RAW_POV))
+                    return (r->btn & (1u << b)) ? 65535 : 0;
+                // Otherwise the hat is not present, so a mapped button is the
+                // only D-pad source there is.
                 if (route[slot][b] < 0 && b >= 10 && b < 14)
                     return (r->btn & (1u << b)) ? 65535 : 0;
                 int bit = route[slot][b] >= 0 ? route[slot][b] : b;
@@ -1226,6 +1439,38 @@ static void BuildMapped(const RAW *r, int slot, PAD_GAMEPAD *g)
                 : Val(r, slot, T_RL) > 32767 ? -32767 : 0;
     g->sThumbRY = Val(r, slot, T_RU) > 32767 ? 32767
                 : Val(r, slot, T_RD) > 32767 ? -32767 : 0;
+}
+
+// Log which buttons a pad reports, but only when they change, so the log stays
+// short and shows exactly what the game receives.
+static void LogPadState(int slot, const PAD_GAMEPAD *g)
+{
+    static const struct { WORD bit; const char *n; } BN[] = {
+        { 0x0001, "up" }, { 0x0002, "down" }, { 0x0004, "left" }, { 0x0008, "right" },
+        { 0x0010, "start" }, { 0x0020, "back" }, { 0x0040, "l3" }, { 0x0080, "r3" },
+        { 0x0100, "lb" }, { 0x0200, "rb" }, { 0x1000, "a" }, { 0x2000, "b" },
+        { 0x4000, "x" }, { 0x8000, "y" }
+    };
+    static unsigned lastBtn[4] = { 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu };
+    static unsigned lastTr[4];
+    unsigned tr = ((unsigned)g->bLeftTrigger << 16) | g->bRightTrigger;
+    if (g->wButtons == lastBtn[slot] && tr == lastTr[slot]) return;
+    lastBtn[slot] = g->wButtons;
+    lastTr[slot] = tr;
+
+    char b[128];
+    b[0] = 0;
+    for (int k = 0; k < (int)(sizeof BN / sizeof BN[0]); k++)
+    {
+        if (!(g->wButtons & BN[k].bit)) continue;
+        if (b[0]) lstrcatA(b, " ");
+        lstrcatA(b, BN[k].n);
+    }
+    char m[224];
+    wsprintfA(m, "pad slot %d btns=%s lt=%u rt=%u lx=%d ly=%d rx=%d ry=%d",
+              slot, b[0] ? b : "none", g->bLeftTrigger, g->bRightTrigger,
+              (int)g->sThumbLX, (int)g->sThumbLY, (int)g->sThumbRX, (int)g->sThumbRY);
+    Log(m);
 }
 
 // DirectInput usually reports a stick as 0..65535 with rest at the middle.
@@ -1320,6 +1565,7 @@ static int RawFromDI(int slot, RAW *r)
 
     DWORD pov = L->pov >= 0 ? *(DWORD *)(buf + L->pov) : 0xFFFFFFFF;
     if (pov != 0xFFFFFFFF) {
+        r->btn |= RAW_POV;
         DWORD deg = pov / 100;
         if (deg >= 315 || deg < 45)  r->btn |= 1u << B_UP;
         if (deg >= 45  && deg < 135) r->btn |= 1u << B_RIGHT;
@@ -1755,6 +2001,28 @@ static int RecoverPhys(int slot, PFN_GETSTATE real)
     return only;
 }
 
+
+// The game calls XInputSetState on several indices every frame, but only the
+// pad it picked for vibration carries a non-zero value. Zero reports on the
+// other indices must never stop a rumble that is running.
+static int ActiveXInputSlot(void)
+{
+    int s;
+    for (s = 0; s < 4; s++)
+        if (!diToken[s][0] && map[s] >= 0) return s;
+    for (s = 0; s < 4; s++)
+        if (diToken[s][0]) return s;
+    return -1;
+}
+
+// A pad on a DirectInput slot can take rumble as a HID output report even when
+// DirectInput force feedback is unavailable.
+static int PadHasHidRumble(int slot)
+{
+    if (slot < 0 || slot > 3 || !diToken[slot][0]) return 0;
+    return HidOpen(slot) != INVALID_HANDLE_VALUE;
+}
+
 /* ---------------- exports ---------------- */
 
 DWORD WINAPI XInputGetState(DWORD idx, PAD_STATE *s);
@@ -1807,6 +2075,14 @@ DWORD WINAPI XInputGetState(DWORD idx, PAD_STATE *s)
 
     AutoMaybe();
 
+    // An index the game polls but the mapping left empty answers with the
+    // pad the player actually uses, so the game sees a controller there.
+    if (idx <= 3 && !diToken[idx][0] && map[idx] < 0)
+    {
+        int a = ActiveXInputSlot();
+        if (a >= 0 && diToken[a][0]) idx = (DWORD)a;
+    }
+
     int di = (idx <= 3 && diToken[idx][0]);
     if (!di)
     {
@@ -1824,6 +2100,7 @@ DWORD WINAPI XInputGetState(DWORD idx, PAD_STATE *s)
                 RAW r;
                 RawFromXInput(s, &r);
                 BuildMapped(&r, (int)idx, &s->Gamepad);
+                LogPadState((int)idx, &s->Gamepad);
             }
             if (rc == 0) return 0;
         }
@@ -1840,9 +2117,17 @@ DWORD WINAPI XInputGetState(DWORD idx, PAD_STATE *s)
         if (!RawFromSony((int)idx, &r) && !RawFromDI((int)idx, &r)) { memset(s, 0, sizeof *s); return 1167; }
         s->dwPacketNumber = GetTickCount();
         BuildMapped(&r, (int)idx, &s->Gamepad);
+        LogPadState((int)idx, &s->Gamepad);
         return 0;
     }
-    memset(s, 0, sizeof *s);
+    // Nothing is mapped to this index. Forward the real pad untouched: this
+    // is where a ViGEm virtual controller lives, and hiding it makes a game
+    // see the pad but receive no buttons.
+    if (real) {
+        DWORD rc = real(idx, s);
+        if (rc == 0) return 0;
+    }
+    if (s) memset(s, 0, sizeof *s);
     return 1167;
 }
 
@@ -1853,34 +2138,125 @@ DWORD WINAPI XInputSetState(DWORD idx, PAD_VIBRATION *v)
     HMODULE mod = NULL; mod = RealModule(); (void)mod;
     AutoMaybe();
 
-    int di = (idx <= 3 && diToken[idx][0]);
-    if (!di)
     {
-        int phys = (idx <= 3) ? map[idx] : -1;
-        if (phys >= 0 && real && vib[idx])
+        static int n;
+        static int nz;
+        n++;
+        int ll = v ? v->wLeftMotorSpeed : 0, rr = v ? v->wRightMotorSpeed : 0;
+        if (ll || rr || nz < 4)
         {
-            if (real((DWORD)phys, v) != 0)
-            {
-                static PFN_GETSTATE getState;
-                if (!getState) getState = (PFN_GETSTATE)RealProc("XInputGetState");
-                int moved = getState ? RecoverPhys((int)idx, getState) : -1;
-                if (moved >= 0) real((DWORD)moved, v);
-            }
+            char sm[160];
+            char src[32];
+            if (idx <= 3 && diToken[idx][0]) lstrcpynA(src, diToken[idx], sizeof src);
+            else if (idx <= 3 && map[idx] >= 0) wsprintfA(src, "x%d", map[idx]);
+            else lstrcpyA(src, "empty");
+            wsprintfA(sm, "setstate #%d idx %lu l=%u r=%u vib=%d src=%s",
+                      n, (unsigned long)idx, ll, rr,
+                      idx <= 3 ? vib[idx] : -1, src);
+            Log(sm);
+            if (ll || rr) nz++;
         }
     }
-    if (idx > 3) return 1167;
-    if (!vib[idx]) return 0;
-    if (!di) return 0;
 
-    IDirectInputDevice8W *dev = DiDevice((int)idx);
+    if (idx > 3) return 1167;
+
+    int di = diToken[idx][0];
+    int phys = map[idx];
+    int requested = v && (v->wLeftMotorSpeed || v->wRightMotorSpeed);
+
+    // The game calls SetState on every index each frame, but only the pad it
+    // picked for vibration carries power. A zero report on any other index
+    // must not switch off the rumble that is running.
+    if (!requested)
+    {
+        if (!di && real && (phys < 0 || vib[idx]))
+            real((DWORD)(phys >= 0 ? phys : (int)idx), v);
+        return 0;
+    }
+
+    // Send the vibration to the pad the player actually uses, whichever user
+    // index the game decided to address. A configured XInput pad keeps its
+    // own index; an empty one falls back to the active mapped pad so rumble
+    // is not lost when the mapping and the game disagree about the slot.
+    int slot;
+    if (di) slot = (int)idx;
+    else if (phys >= 0) slot = (int)idx;
+    else slot = ActiveXInputSlot();
+    if (slot < 0 || slot > 3 || !vib[slot]) return 0;
+
+    {
+        static int loggedIdx[4] = { -2, -2, -2, -2 };
+        if (loggedIdx[idx] != slot)
+        {
+            loggedIdx[idx] = slot;
+            char rm[420];
+            int hidr = PadHasHidRumble(slot) ||
+                       (!diToken[slot][0] && HidOpenXi(slot) != INVALID_HANDLE_VALUE);
+            const char *rt = hidr ? "HID" :
+                             (diToken[slot][0] ? "DInput" : "XInput");
+            const char *rd = hidr
+                ? (g_hidPath[slot][0] ? g_hidPath[slot] : "HID endpoint")
+                : (diToken[slot][0] ? "DirectInput device" : "system XInput driver");
+            wsprintfA(rm, "rumble idx %lu -> slot %d via %s -> %s",
+                      (unsigned long)idx, slot, rt, rd);
+            Log(rm);
+        }
+    }
+
+    if (PadHasHidRumble(slot))
+    {
+        // Pads whose rumble only lives on a raw HID output report must be
+        // driven HID-first. The ShanWan 2563:0575 "PC/PS3" clone is the known
+        // case: it advertises force feedback over DirectInput, but
+        // CreateEffect fails on a non-exclusive device, so the DI path below
+        // silently produced no vibration.
+        int l = (v->wLeftMotorSpeed * 255 + 32767) / 65535;
+        int r = (v->wRightMotorSpeed * 255 + 32767) / 65535;
+        HidSet(slot, l, r, 200);
+        return 0;
+    }
+    if (!diToken[slot][0])
+    {
+        // The slot is bound to the system XInput driver. The pad actually
+        // reporting there can be any XInput device (an Xbox pad over
+        // Bluetooth, for example), so its own driver must always receive the
+        // rumble. The ShanWan HID endpoint is only an extra: when that clone
+        // is the pad on this slot the driver report does nothing useful and
+        // the HID report is what turns the weight, but forwarding to the
+        // driver as well is harmless and keeps every other XInput pad
+        // rumbling. Driving HID only here silenced the Xbox controller.
+        int l = (v->wLeftMotorSpeed * 255 + 32767) / 65535;
+        int r = (v->wRightMotorSpeed * 255 + 32767) / 65535;
+        {
+            static int flogged;
+            if (flogged < 12 && (v->wLeftMotorSpeed || v->wRightMotorSpeed))
+            {
+                flogged++;
+                DWORD rc = 1167;
+                if (real && map[slot] >= 0) rc = real((DWORD)map[slot], v);
+                char fm[120];
+                wsprintfA(fm, "fwd xinput slot %d phys %d real %d rc %lu l=%u r=%u",
+                          slot, map[slot], real ? 1 : 0, (unsigned long)rc,
+                          v->wLeftMotorSpeed, v->wRightMotorSpeed);
+                Log(fm);
+                if (HidOpenXi(slot) != INVALID_HANDLE_VALUE) HidSet(slot, l, r, 200);
+                return 0;
+            }
+            if (real && map[slot] >= 0) real((DWORD)map[slot], v);
+        }
+        if (HidOpenXi(slot) != INVALID_HANDLE_VALUE) HidSet(slot, l, r, 200);
+        return 0;
+    }
+
+    IDirectInputDevice8W *dev = DiDevice(slot);
     if (!dev) return 0;
 
-    if (!g_eff[idx] && g_effTried[idx] < 3) {
-        g_effTried[idx]++;
+    if (!g_eff[slot] && g_effTried[slot] < 3) {
+        g_effTried[slot]++;
         dev->lpVtbl->Acquire(dev);
         DIEFFECT eff;
         memset(&eff, 0, sizeof eff);
-        DWORD axes[1] = { (DWORD)g_lay[idx].lx }; // real X axis on this layout
+        DWORD axes[1] = { (DWORD)g_lay[slot].lx }; // real X axis on this layout
         LONG dir[1] = { 0 };
         DICONSTANTFORCE cf = { 0 };
         eff.dwSize = sizeof eff;
@@ -1895,27 +2271,28 @@ DWORD WINAPI XInputSetState(DWORD idx, PAD_VIBRATION *v)
         eff.lpvTypeSpecificParams = &cf;
         IDirectInputEffect *created = NULL;
         HRESULT cr = dev->lpVtbl->CreateEffect(dev, &GUID_ConstantForce, &eff, &created, NULL);
-        if (SUCCEEDED(cr)) g_eff[idx] = created;
+        if (SUCCEEDED(cr)) g_eff[slot] = created;
         char msg[64];
-        wsprintfA(msg, "vibration effect slot %lu hr %08lX", idx, (unsigned long)cr);
+        wsprintfA(msg, "vibration effect slot %d hr %08lX", slot, (unsigned long)cr);
         Log(msg);
     }
-    if (!g_eff[idx]) {   // DirectInput could not create an effect: try HID
-        HidSet((int)idx, v->wLeftMotorSpeed / 257, v->wRightMotorSpeed / 257, 500);
+    if (!g_eff[slot]) {   // DirectInput could not create an effect: try HID
+        HidSet(slot, v->wLeftMotorSpeed / 257, v->wRightMotorSpeed / 257, 200);
         return 0;
     }
-    if (g_eff[idx]) {
+    {
         LONG mag = (v->wLeftMotorSpeed + v->wRightMotorSpeed) / 2;
+        if (mag > DI_FFNOMINALMAX) mag = DI_FFNOMINALMAX;
         DICONSTANTFORCE cf = { mag };
         DIEFFECT eff;
         memset(&eff, 0, sizeof eff);
         eff.dwSize = sizeof eff;
         eff.cbTypeSpecificParams = sizeof cf;
         eff.lpvTypeSpecificParams = &cf;
-        if (SUCCEEDED(g_eff[idx]->lpVtbl->SetParameters(g_eff[idx], &eff, DIEP_TYPESPECIFICPARAMS)))
+        if (SUCCEEDED(g_eff[slot]->lpVtbl->SetParameters(g_eff[slot], &eff, DIEP_TYPESPECIFICPARAMS)))
         {
-            if (mag > 0) g_eff[idx]->lpVtbl->Start(g_eff[idx], 1, 0);
-            else g_eff[idx]->lpVtbl->Stop(g_eff[idx]);
+            if (mag > 0) g_eff[slot]->lpVtbl->Start(g_eff[slot], 1, 0);
+            else g_eff[slot]->lpVtbl->Stop(g_eff[slot]);
         }
     }
     return 0;
@@ -1928,11 +2305,20 @@ DWORD WINAPI XInputGetCapabilities(DWORD idx, DWORD f, void *c)
     HMODULE mod = NULL; mod = RealModule(); (void)mod;
     AutoMaybe();
 
+    // Report the same capabilities for an index the game polls even when the
+    // mapping left it empty, otherwise the game thinks no pad is attached
+    // there and ignores its vibration requests.
+    if (idx <= 3 && !diToken[idx][0] && map[idx] < 0)
+    {
+        int a = ActiveXInputSlot();
+        if (a >= 0 && diToken[a][0]) idx = (DWORD)a;
+    }
+
     int di = (idx <= 3 && diToken[idx][0]);
     if (!di)
     {
         int phys = (idx <= 3) ? map[idx] : -1;
-        if (phys >= 0 && real) return real((DWORD)phys, f, c);
+        if (real) return real((DWORD)(phys >= 0 ? phys : (int)idx), f, c);
     }
     if (idx > 3) return 1167;
 
@@ -1941,7 +2327,23 @@ DWORD WINAPI XInputGetCapabilities(DWORD idx, DWORD f, void *c)
     memset(p, 0, 20);
     p[0] = 1;          // XINPUT_DEVTYPE_GAMEPAD
     p[1] = 1;          // XINPUT_DEVSUBTYPE_GAMEPAD
-    *(WORD *)(p + 2) = 0x0471; // VOICE_SUPPORTED | FFB_SUPPORTED
+    *(WORD *)(p + 2) = 0x0001;  // XINPUT_CAPS_FFB_SUPPORTED (was 0x0471: undefined bits)
+    // XINPUT_CAPABILITIES.Gamepad must still carry a nonzero vibration
+    // resolution: some games read zero here and conclude the pad cannot rumble.
+    *(WORD *)(p + 16) = 0xFFFF; // wLeftMotorSpeed
+    *(WORD *)(p + 18) = 0xFFFF; // wRightMotorSpeed
+    {
+        static int logged;
+        if (logged < 2)
+        {
+            logged++;
+            char gm[96];
+            wsprintfA(gm, "getcaps idx %lu flags %04x vib %04x/%04x",
+                      (unsigned long)idx, *(WORD *)(p + 2),
+                      *(WORD *)(p + 16), *(WORD *)(p + 18));
+            Log(gm);
+        }
+    }
     return 0;
 }
 
@@ -1966,7 +2368,8 @@ DWORD WINAPI XInputGetBatteryInformation(DWORD i, BYTE t, void *b)
         return 0;
     }
     int phys = map[i];
-    return (phys >= 0 && f) ? f((DWORD)phys, t, b) : 1167;
+    if (phys < 0) phys = (int)i;
+    return f ? f((DWORD)phys, t, b) : 1167;
 }
 
 DWORD WINAPI XInputGetKeystroke(DWORD i, DWORD f2, void *k)
@@ -1977,7 +2380,8 @@ DWORD WINAPI XInputGetKeystroke(DWORD i, DWORD f2, void *k)
     if (i > 3) return 1167;
     if (diToken[i][0]) return 1167;
     int phys = map[i];
-    return (phys >= 0 && f) ? f((DWORD)phys, f2, k) : 1167;
+    if (phys < 0) phys = (int)i;
+    return f ? f((DWORD)phys, f2, k) : 1167;
 }
 
 DWORD WINAPI XInputGetDSoundAudioDeviceGuids(DWORD i, void *r, void *c)
@@ -1989,5 +2393,6 @@ DWORD WINAPI XInputGetDSoundAudioDeviceGuids(DWORD i, void *r, void *c)
     if (i > 3) return 1167;
     if (diToken[i][0]) return 1167;
     int phys = map[i];
-    return (phys >= 0 && f) ? f((DWORD)phys, r, c) : 1167;
+    if (phys < 0) phys = (int)i;
+    return f ? f((DWORD)phys, r, c) : 1167;
 }
