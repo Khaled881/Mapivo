@@ -13,7 +13,8 @@ public static class GameLauncher
         string name = "xinput1_3.dll";
         if (exePath != null)
         {
-            var imports = PeArchitectureReader.FindXInputImports(exePath);
+            var imports = PeArchitectureReader.FindXInputImports(
+                PeArchitectureReader.ResolveImportSource(exePath));
             if (imports.Count > 0) name = imports[0];
         }
         return Path.Combine(dir, name);
@@ -61,13 +62,25 @@ public static class GameLauncher
         var srcDir = Path.GetDirectoryName(dllPath);
         if (srcDir == null) { error = "Bad hook path"; return false; }
 
+        // Only the DLLs the exe actually imports. Dropping every xinput variant
+        // plus dinput8.dll into a folder that only wanted one of them is what
+        // some game loaders/anti-tamper reject at startup.
+        // A launcher exe imports neither API, so look at its sibling game exe.
+        var srcExe = PeArchitectureReader.ResolveImportSource(exePath);
+        var wanted = new List<string>();
+        foreach (var n in PeArchitectureReader.FindXInputImports(srcExe))
+            wanted.Add(n);
+        if (PeArchitectureReader.ImportsDll(srcExe, "dinput8.dll"))
+            wanted.Add("dinput8.dll");
+        if (wanted.Count == 0) wanted.Add(Path.GetFileName(dllPath));
+
         try
         {
-            foreach (var pat in new[] { "xinput*.dll", "dinput8.dll" })
-            foreach (var src in Directory.EnumerateFiles(srcDir, pat))
+            foreach (var n in wanted)
             {
-                var target = Path.Combine(gameDir, Path.GetFileName(src));
-                File.Copy(src, target, true);
+                var src = Path.Combine(srcDir, n);
+                if (!File.Exists(src)) { error = "Hook DLL not found: " + src; return false; }
+                File.Copy(src, Path.Combine(gameDir, n), true);
             }
         }
         catch (Exception ex)

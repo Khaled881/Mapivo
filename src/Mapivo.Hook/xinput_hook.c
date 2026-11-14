@@ -1259,19 +1259,34 @@ static DWORD WINAPI InitThread(LPVOID p)
         {
             if (!diToken[s][0] && map[s] < 0) continue;
             if (diToken[s][0]) DiDevice(s);   // resolve name + force feedback now
-            char src[32], m[600];
+            char src[32], m[700], *w;
+            src[0] = 0;
             if (diToken[s][0]) lstrcpynA(src, diToken[s], sizeof src);
             else wsprintfA(src, "x%d", map[s]);
             int hid = diToken[s][0] ? (HidOpen(s) != INVALID_HANDLE_VALUE)
                                     : (map[s] >= 0 && HidOpenXi(s) != INVALID_HANDLE_VALUE);
-            const char *dev = (diToken[s][0] && g_devName[s][0]) ? g_devName[s][0] : "-";
+            const char *dev = (diToken[s][0] && g_devName[s][0]) ? g_devName[s] : "-";
             const char *how = hid ? "HID" : (diToken[s][0] ? "DInput" : "XInput");
             const char *out = hid
                 ? (g_hidPath[s][0] ? g_hidPath[s] : "HID endpoint")
                 : (diToken[s][0] ? "DInput only (no HID endpoint)"
                                  : (map[s] >= 0 ? "system XInput driver" : "nothing"));
-            wsprintfA(m, "slot %d src %s vib %d dev %s ffb %d rumble %s -> out %s",
-                      s, src, vib[s], dev, diToken[s][0] ? g_devFf[s] : -1, how, out);
+            // Built in steps: one wsprintfA with five %s arguments silently
+            // mismatched on this toolchain and passed a garbage pointer to
+            // user32's wsprintfA, which then faulted on 0x0. Only %d stays in
+            // a format string and every string goes through lstrcpynA.
+            w = m;
+            w += wsprintfA(w, "slot %d src ", s);
+            lstrcpynA(w, src, (int)(sizeof m) - (int)(w - m));
+            w += lstrlenA(w);
+            w += wsprintfA(w, " vib %d dev ", vib[s]);
+            lstrcpynA(w, dev, (int)(sizeof m) - (int)(w - m));
+            w += lstrlenA(w);
+            w += wsprintfA(w, " ffb %d rumble ", diToken[s][0] ? g_devFf[s] : -1);
+            lstrcpynA(w, how, (int)(sizeof m) - (int)(w - m));
+            w += lstrlenA(w);
+            w += wsprintfA(w, " -> out ");
+            lstrcpynA(w, out, (int)(sizeof m) - (int)(w - m));
             Log(m);
         }
     }
@@ -2318,7 +2333,31 @@ DWORD WINAPI XInputGetCapabilities(DWORD idx, DWORD f, void *c)
     if (!di)
     {
         int phys = (idx <= 3) ? map[idx] : -1;
-        if (real) return real((DWORD)(phys >= 0 ? phys : (int)idx), f, c);
+        if (!c) return 1167;
+
+        // The real driver's XInput interface on a DirectInput-only pad does not
+        // advertise force feedback, so games skip rumble entirely. Keep its
+        // identity and vibration resolutions, but force the FFB bit on.
+        unsigned char rc2[20];
+        memset(rc2, 0, sizeof rc2);
+        DWORD rc = 1167;
+        if (real) rc = real((DWORD)(phys >= 0 ? phys : (int)idx), f, rc2);
+        if (rc != 0) return rc;
+        if (idx > 3) return 1167;
+
+        unsigned char *p = (unsigned char *)c;
+        memset(p, 0, 20);
+        p[0] = rc2[0] ? rc2[0] : 1;   /* XINPUT_DEVTYPE_GAMEPAD */
+        p[1] = rc2[1] ? rc2[1] : 1;   /* XINPUT_DEVSUBTYPE_GAMEPAD */
+        *(WORD *)(p + 2) = 0x0001;    /* XINPUT_CAPS_FFB_SUPPORTED */
+        memcpy(p + 4, rc2 + 4, 12);
+        *(WORD *)(p + 16) = 0xFFFF;   /* wLeftMotorSpeed */
+        *(WORD *)(p + 18) = 0xFFFF;   /* wRightMotorSpeed */
+        {
+            static int xiLogged;
+            if (xiLogged < 8) { xiLogged++; char gx[72]; wsprintfA(gx, "getcaps xi idx %lu flags %04x", (unsigned long)idx, *(WORD *)(p + 2)); Log(gx); }
+        }
+        return 0;
     }
     if (idx > 3) return 1167;
 

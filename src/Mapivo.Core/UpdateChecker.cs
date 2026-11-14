@@ -77,8 +77,18 @@ public static class UpdateChecker
         var nums = new List<int>();
         foreach (var p in parts)
         {
-            if (int.TryParse(p, out var n)) nums.Add(n);
-            else break;
+            int i = 0;
+            while (i < p.Length && char.IsDigit(p[i])) i++;
+            if (i == 0) break;
+            if (!int.TryParse(p.AsSpan(0, i), out var n)) break;
+            nums.Add(n);
+            // A trailing letter marks a beta build ("1.0.1B"): rank it above the
+            // bare number so the update check still offers it.
+            if (i < p.Length)
+            {
+                char c = char.ToUpperInvariant(p[i]);
+                nums.Add(c >= 'A' && c <= 'Z' ? c - 'A' + 1 : 0);
+            }
         }
         return nums.ToArray();
     }

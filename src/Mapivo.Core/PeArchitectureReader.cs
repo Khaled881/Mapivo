@@ -80,8 +80,8 @@ public static class PeArchitectureReader
     public static bool IsSupported(PeArchitecture arch) =>
         arch is PeArchitecture.X86 or PeArchitecture.X64;
 
-    /// <summary>xinput DLL names the exe imports, lowercase, preferred order.</summary>
-    public static List<string> FindXInputImports(string exePath)
+    /// <summary>Every DLL name the exe statically imports, lowercase, encounter order.</summary>
+    static List<string> FindImports(string exePath)
     {
         var found = new List<string>();
         try
@@ -96,12 +96,14 @@ public static class PeArchitectureReader
 
             while (true)
             {
+                // IMPORT_DESCRIPTOR: OriginalFirstThunk(0), TimeDateStamp(4),
+                // ForwarderChain(8), Name(12), FirstThunk(16).
                 br.BaseStream.Position = impOff;
+                br.ReadUInt32();
+                br.ReadUInt32();
+                br.ReadUInt32();
                 uint nameRva = br.ReadUInt32();
-                br.ReadUInt32();
-                br.ReadUInt32();
                 uint firstThunk = br.ReadUInt32();
-                br.ReadUInt32();
                 if (nameRva == 0 && firstThunk == 0) break;
 
                 long nameOff = RvaToOffset(sections, nameRva);
@@ -112,13 +114,60 @@ public static class PeArchitectureReader
                     byte b;
                     while ((b = br.ReadByte()) != 0) sb.Append((char)b);
                     var name = sb.ToString().ToLowerInvariant();
-                    if (KnownXInputDlls.Contains(name) && !found.Contains(name))
+                    if (!found.Contains(name))
                         found.Add(name);
                 }
                 impOff += 20;
             }
         }
         catch { }
-        return found.OrderBy(n => Array.IndexOf(KnownXInputDlls, n)).ToList();
+        return found;
+    }
+
+    /// <summary>xinput DLL names the exe imports, lowercase, preferred order.</summary>
+    public static List<string> FindXInputImports(string exePath)
+        => FindImports(exePath)
+            .Where(n => KnownXInputDlls.Contains(n))
+            .OrderBy(n => Array.IndexOf(KnownXInputDlls, n))
+            .ToList();
+
+    /// <summary>True when the exe statically imports the named DLL (case-insensitive).</summary>
+    public static bool ImportsDll(string exePath, string dllName)
+        => FindImports(exePath).Contains(dllName.ToLowerInvariant());
+
+    static bool ImportsXInput(string exePath)
+    {
+        var imp = FindImports(exePath);
+        for (int i = 0; i < imp.Count; i++)
+            if (KnownXInputDlls.Contains(imp[i])) return true;
+        return false;
+    }
+
+    static bool ImportsDirectInput(string exePath)
+        => ImportsDll(exePath, "dinput8.dll");
+
+    /// <summary>
+    /// The exe whose imports matter for the hook. Games often ship a launcher
+    /// (WWE2K15Launcher.exe) that imports no controller API while the actual
+    /// game exe next to it does, so fall back to scanning siblings: first for
+    /// an XInput consumer, then for a DirectInput one.
+    /// </summary>
+    public static string ResolveImportSource(string exePath)
+    {
+        if (ImportsXInput(exePath) || ImportsDirectInput(exePath)) return exePath;
+        var dir = Path.GetDirectoryName(exePath);
+        if (dir == null) return exePath;
+        try
+        {
+            var exes = Directory.EnumerateFiles(dir, "*.exe")
+                .Where(f => !string.Equals(f, exePath, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var xi = exes.FirstOrDefault(ImportsXInput);
+            if (xi != null) return xi;
+            var di = exes.FirstOrDefault(ImportsDirectInput);
+            if (di != null) return di;
+        }
+        catch { }
+        return exePath;
     }
 }

@@ -13,7 +13,7 @@
 
 ## نصب
 
-فایل **`Mapivo-Setup-1.0.1.exe`** را از بخش [Releases](../../releases) دانلود و اجرا کنید.
+فایل **`Mapivo-Setup-1.0.1.1.exe`** را از بخش [Releases](../../releases) دانلود و اجرا کنید.
 
 - یک ستاپ برای هر دو ویندوز **x64** و **ARM64**؛ خودش نسخهٔ درست را انتخاب می‌کند.
 - **نیازی به دسترسی ادمین نیست**: به‌صورت per-user در `%LOCALAPPDATA%\Programs\Mapivo` نصب می‌شود.
@@ -87,7 +87,7 @@ tools/build-hook.bat
 "C:\Program Files\Inno Setup 7\ISCC.exe" installer\Mapivo.iss
 ```
 
-فایل ستاپ در `out/installer/Mapivo-Setup-1.0.1.exe` ساخته می‌شود و شامل هر دو نسخهٔ x64 و ARM64 است.
+فایل ستاپ در `out/installer/Mapivo-Setup-1.0.1.1.exe` ساخته می‌شود و شامل هر دو نسخهٔ x64 و ARM64 است.
 
 ---
 

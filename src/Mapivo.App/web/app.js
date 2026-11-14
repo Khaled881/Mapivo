@@ -522,7 +522,7 @@ function renderSettings() {
   $('#setStartMin').checked = !!state.settings.startMinimized;
   $('#setDllFolder').value = state.settings.dllFolder || 'DLL';
   $('#setLanguage').value = state.settings.language || getMapivoLang() || 'en';
-  const v = state.settings.version || '1.0.1';
+  const v = state.settings.version || '1.0.1.1';
   if ($('#setVersion')) $('#setVersion').textContent = 'v' + v;
   if ($('#setVersionText')) $('#setVersionText').textContent = v;
   if ($('#railVersion')) $('#railVersion').textContent = 'v' + v;

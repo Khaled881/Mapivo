@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.0.1.1
+
+### Fixed
+
+- **Game crashes on launch after "Copy to game" (WWE 2K15 and similar)** —
+  the PE reader read the import descriptor at the wrong offsets, so the exe
+  was treated as importing nothing and every `xinput*.dll` plus `dinput8.dll`
+  was dropped into the game folder. Some game loaders reject that set at
+  startup. The import table is now read correctly, and only the DLLs the exe
+  actually imports are copied. A launcher exe is resolved to its sibling game
+  exe first, so importing from a launcher works too.
+- **Hook crash at startup** — the per-slot summary log passed a single
+  character instead of a string to `wsprintfA`, which faulted inside
+  `user32!wvsprintfA`. The line is now built in single-argument steps.
+- **Missing rumble capability** — a pad reached through the system XInput
+  driver did not advertise force feedback, so games skipped vibration
+  entirely. The capabilities are reported with the FFB bit set while keeping
+  the driver's real motor resolutions.
+- **Virtual-pad input delay** — the virtual pad was refreshed only every
+  10 ms, so on some machines a button press reached the game one frame or
+  more late. The refresh interval is now 5 ms and the loop keeps a fixed
+  deadline instead of drifting, which removes the accumulated delay.
+- **Sleep granularity** — the driver asks Windows for a 1 ms timer while it
+  runs, so the 5 ms cadence is actually met instead of sliding to the default
+  15.6 ms system tick.
+
+### Notes
+
+- The virtual-pad thread now runs at the process's normal priority. Raising it
+  was tried and made things worse when the game itself was raised: on a slower
+  CPU the input thread lost the race against the game's own threads, which
+  added the very delay the fix was meant to remove.
+- Everything from 1.0.1 is included.
+
 ## 1.0.1
 
 ### Added

@@ -1,5 +1,6 @@
 
 using Mapivo.Core;
+using System.Runtime.InteropServices;
 
 namespace Mapivo.App;
 
@@ -17,7 +18,7 @@ sealed class DriverEngine
         public Dictionary<string, string> Map = new();
     }
 
-    public const int TickMs = 10;
+    public const int TickMs = 5;
 
     static readonly string[] Btn =
     {
@@ -36,6 +37,10 @@ sealed class DriverEngine
     readonly int[][] _src = new int[VirtualPadManager.MaxSlots][];
     Thread? _thread;
     volatile bool _running;
+
+    [DllImport("winmm.dll")] static extern uint timeBeginPeriod(uint ms);
+    [DllImport("winmm.dll")] static extern uint timeEndPeriod(uint ms);
+    static bool _timerPeriod;
 
     public bool Running => _running;
     public string Error { get; private set; } = "";
@@ -62,7 +67,13 @@ sealed class DriverEngine
         _routes.AddRange(routes);
         Error = "";
         _running = true;
+        if (!_timerPeriod)
+        {
+            timeBeginPeriod(1);
+            _timerPeriod = true;
+        }
         _thread = new Thread(Loop) { IsBackground = true, Name = "Mapivo virtual pads" };
+        _thread.Priority = ThreadPriority.Normal;
         _thread.Start();
         return true;
     }
@@ -75,6 +86,11 @@ sealed class DriverEngine
         if (t != null)
         {
             try { t.Join(400); } catch { }
+        }
+        if (_timerPeriod)
+        {
+            timeEndPeriod(1);
+            _timerPeriod = false;
         }
         for (int i = 0; i < VirtualPadManager.MaxSlots; i++)
         {
@@ -103,17 +119,22 @@ sealed class DriverEngine
 
     void Loop()
     {
+        long next = Environment.TickCount64;
         while (_running)
         {
-            long at = Environment.TickCount64;
             foreach (var r in _routes)
             {
                 if (!_running) break;
                 try { Pump(r); } catch { }
             }
-            long spent = Environment.TickCount64 - at;
-            int wait = TickMs - (int)spent;
-            if (wait > 0) Thread.Sleep(wait);
+
+            next += TickMs;
+            long left = next - Environment.TickCount64;
+            if (left > 2) Thread.Sleep((int)(left - 1));
+            while (Environment.TickCount64 < next) Thread.SpinWait(60);
+            // A long stall (window drag, device reset) must not make the loop
+            // burn through a backlog of catch-up frames.
+            if (Environment.TickCount64 - next > TickMs * 4) next = Environment.TickCount64;
         }
     }
 

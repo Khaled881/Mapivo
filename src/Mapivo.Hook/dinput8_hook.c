@@ -49,6 +49,7 @@ static void *g_newVtbl[16];
 static BOOL WINAPI FilterCb(const void *ddi, void *pvRef)
 {
     (void)pvRef;
+    if (!g_userCb) return TRUE;
     if (ddi && ((((const DWORD *)ddi)[5] >> 16) & 0xff) == 4) return FALSE;
     return g_userCb(ddi, g_userRef);
 }
