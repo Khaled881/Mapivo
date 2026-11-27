@@ -91,6 +91,9 @@ static char diToken[4][24];          // "" = slot is XInput or empty
 static char slotMap[4][T_COUNT][8];  // target -> source name
 static int mapped[4];
 static int cfgPresent;               // mapivo.ini was found
+static char g_host[64];              // exe name this hook is meant for ("" = any)
+static int g_hostChecked;            // host name compared once per process
+static int g_hostActive = 1;         // 1 = this process is the configured game
 static unsigned long long autoTick;  // throttle for device auto-detection
 static int route[4][16];             // target -> raw HID index on a DInput pad
 static int loaded = 0;
@@ -1026,6 +1029,22 @@ static void *RealProc(const char *name)
     return m ? (void *)GetProcAddress(m, name) : NULL;
 }
 
+// True when this process is the exe the profile was installed for. With no
+// host= line (older ini files) every exe stays active, preserving old behavior.
+// settings.exe, launchers and other tools in the folder then pass straight
+// through, so they still see the real controllers and do not crash.
+static int HostActive(void)
+{
+    if (g_hostChecked) return g_hostActive;
+    g_hostChecked = 1;
+    if (!g_host[0]) { g_hostActive = 1; return g_hostActive; }
+    char self[MAX_PATH], *n;
+    g_hostActive = 0;
+    if (GetModuleFileNameA(NULL, self, MAX_PATH) && (n = strrchr(self, '\\')) != NULL)
+        g_hostActive = _stricmp(n + 1, g_host) == 0;
+    return g_hostActive;
+}
+
 // The log sits next to the host exe. Several proxy DLLs load into the same
 // game, each with its own copy of this code, so every line is tagged with the
 // name of the DLL that wrote it. The file is wiped when a new game process
@@ -1172,6 +1191,15 @@ static void ReadConfig(void)
         char *next = strchr(line, '\n');
         if (next) *next++ = 0;
 
+        // host=<exe> makes this proxy pass through untouched in every other
+        // exe of the folder (a launcher, settings.exe, a crash reporter), so a
+        // tool that enumerates real pads keeps seeing them.
+        if (strncmp(line, "host=", 5) == 0) {
+            char *v = line + 5;
+            Trim(v);
+            lstrcpynA(g_host, v, sizeof g_host);
+            continue;
+        }
         if (line[0] >= '0' && line[0] <= '3' && line[1] == '.') {
             int slot = line[0] - '0';
             char *key = line + 2;
@@ -2087,6 +2115,7 @@ DWORD WINAPI XInputGetState(DWORD idx, PAD_STATE *s)
     static unsigned long long tick;
     if (!real) real = (PFN_GETSTATE)RealProc("XInputGetState");
     HMODULE mod = NULL; mod = RealModule(); (void)mod;
+    if (!HostActive()) return real ? real(idx, s) : 1167;
 
     AutoMaybe();
 
@@ -2151,6 +2180,7 @@ DWORD WINAPI XInputSetState(DWORD idx, PAD_VIBRATION *v)
     static PFN_SETSTATE real;
     if (!real) real = (PFN_SETSTATE)RealProc("XInputSetState");
     HMODULE mod = NULL; mod = RealModule(); (void)mod;
+    if (!HostActive()) return real ? real(idx, v) : 1167;
     AutoMaybe();
 
     {
@@ -2318,6 +2348,7 @@ DWORD WINAPI XInputGetCapabilities(DWORD idx, DWORD f, void *c)
     static PFN_GETCAPS real;
     if (!real) real = (PFN_GETCAPS)RealProc("XInputGetCapabilities");
     HMODULE mod = NULL; mod = RealModule(); (void)mod;
+    if (!HostActive()) return real ? real(idx, f, c) : 1167;
     AutoMaybe();
 
     // Report the same capabilities for an index the game polls even when the
@@ -2400,6 +2431,7 @@ DWORD WINAPI XInputGetBatteryInformation(DWORD i, BYTE t, void *b)
     static PFN_GENERIC f;
     if (!f) f = (PFN_GENERIC)RealProc("XInputGetBatteryInformation");
     HMODULE mod = NULL; mod = RealModule(); (void)mod;
+    if (!HostActive()) return f ? f(i, t, b) : 1167;
     if (i > 3) return 1167;
     if (diToken[i][0]) {
         unsigned char *p = (unsigned char *)b;
@@ -2416,6 +2448,7 @@ DWORD WINAPI XInputGetKeystroke(DWORD i, DWORD f2, void *k)
     static PFN_GENERIC f;
     if (!f) f = (PFN_GENERIC)RealProc("XInputGetKeystroke");
     HMODULE mod = NULL; mod = RealModule(); (void)mod;
+    if (!HostActive()) return f ? f(i, f2, k) : 1167;
     if (i > 3) return 1167;
     if (diToken[i][0]) return 1167;
     int phys = map[i];
@@ -2429,6 +2462,7 @@ DWORD WINAPI XInputGetDSoundAudioDeviceGuids(DWORD i, void *r, void *c)
     static F f;
     if (!f) f = (F)RealProc("XInputGetDSoundAudioDeviceGuids");
     HMODULE mod = NULL; mod = RealModule(); (void)mod;
+    if (!HostActive()) return f ? f(i, r, c) : 1167;
     if (i > 3) return 1167;
     if (diToken[i][0]) return 1167;
     int phys = map[i];

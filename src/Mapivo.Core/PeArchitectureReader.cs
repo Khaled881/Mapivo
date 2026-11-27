@@ -135,6 +135,44 @@ public static class PeArchitectureReader
     public static bool ImportsDll(string exePath, string dllName)
         => FindImports(exePath).Contains(dllName.ToLowerInvariant());
 
+    /// <summary>True when the file contains the given ASCII text, case-insensitive.
+    /// Finds APIs a game loads by name at runtime (LoadLibrary/GetProcAddress)
+    /// rather than through its import table.</summary>
+    public static bool ReferencesString(string path, string needle)
+    {
+        if (string.IsNullOrEmpty(needle)) return false;
+        try
+        {
+            var bytes = File.ReadAllBytes(path);
+            var want = needle.ToLowerInvariant();
+            for (int i = 0; i + want.Length <= bytes.Length; i++)
+            {
+                int k = 0;
+                for (; k < want.Length; k++)
+                {
+                    byte c = bytes[i + k];
+                    if (c >= 'A' && c <= 'Z') c = (byte)(c + 32);
+                    if (c != (byte)want[k]) break;
+                }
+                if (k == want.Length) return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    /// <summary>XInput DLL name the game references at runtime but does not
+    /// statically import, in preferred order ("" when none). Games that load
+    /// XInput by name, like PES2012 which names xinput1_1.dll, still use XInput
+    /// but export no import entry for a proxy to sit on.</summary>
+    public static string DynamicXInputReference(string exePath)
+    {
+        foreach (var n in KnownXInputDlls)
+            if (ReferencesString(exePath, n))
+                return n;
+        return "";
+    }
+
     static bool ImportsXInput(string exePath)
     {
         var imp = FindImports(exePath);

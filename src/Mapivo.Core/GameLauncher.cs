@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 
 namespace Mapivo.Core;
 
@@ -13,9 +13,16 @@ public static class GameLauncher
         string name = "xinput1_3.dll";
         if (exePath != null)
         {
-            var imports = PeArchitectureReader.FindXInputImports(
-                PeArchitectureReader.ResolveImportSource(exePath));
+            var srcExe = PeArchitectureReader.ResolveImportSource(exePath);
+            var imports = PeArchitectureReader.FindXInputImports(srcExe);
             if (imports.Count > 0) name = imports[0];
+            else
+            {
+                // PES2012 loads XInput by name instead of importing it; pick the
+                // name it actually uses so the UI shows the DLL that gets placed.
+                var dyn = PeArchitectureReader.DynamicXInputReference(srcExe);
+                if (dyn.Length > 0) name = dyn;
+            }
         }
         return Path.Combine(dir, name);
     }
@@ -29,6 +36,13 @@ public static class GameLauncher
         var dir = Path.GetDirectoryName(exePath);
         if (dir == null) return;
         var sb = new System.Text.StringBuilder();
+        // The DLLs sit in the folder for every exe, so name the one this
+        // profile is for. A launcher imports no controller API, so the exe
+        // that actually consumes it is the resolved sibling. Each proxy passes
+        // through untouched in any other process (settings.exe, the launcher
+        // itself), which keeps those tools working.
+        var hostExe = PeArchitectureReader.ResolveImportSource(exePath);
+        sb.AppendLine("host=" + Path.GetFileName(hostExe));
         foreach (var b in profile.Bindings.OrderBy(b => b.VirtualSlot))
         {
             sb.AppendLine($"{b.VirtualSlot}.src={(string.IsNullOrEmpty(b.Physical) ? "-1" : b.Physical)}");
@@ -72,10 +86,32 @@ public static class GameLauncher
             wanted.Add(n);
         if (PeArchitectureReader.ImportsDll(srcExe, "dinput8.dll"))
             wanted.Add("dinput8.dll");
+        if (!wanted.Exists(n => n.StartsWith("xinput", StringComparison.OrdinalIgnoreCase)))
+        {
+            // No XInput import, yet the game names an XInput DLL at runtime
+            // (PES2012 loads xinput1_1.dll by name). Without an XInput proxy the
+            // virtual pad never reaches the game, so proxy that name too and let
+            // it load us instead. dinput8 stays: its proxy hides the real pad so
+            // the game does not see the controller twice.
+            var dyn = PeArchitectureReader.DynamicXInputReference(srcExe);
+            if (dyn.Length > 0)
+                wanted.Add(dyn);
+        }
         if (wanted.Count == 0) wanted.Add(Path.GetFileName(dllPath));
 
         try
         {
+            // Drop proxy DLLs we placed on an earlier run that this install no
+            // longer needs (PES2012 first got only dinput8; it now needs the
+            // xinput proxy, and leaving dinput8 behind would hide the pads).
+            foreach (var f in Directory.EnumerateFiles(gameDir, "*.dll"))
+            {
+                var fn = Path.GetFileName(f);
+                bool ours = fn.StartsWith("xinput", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(fn, "dinput8.dll", StringComparison.OrdinalIgnoreCase);
+                if (ours && !wanted.Exists(n => string.Equals(n, fn, StringComparison.OrdinalIgnoreCase)))
+                    File.Delete(f);
+            }
             foreach (var n in wanted)
             {
                 var src = Path.Combine(srcDir, n);

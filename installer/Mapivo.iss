@@ -1,6 +1,6 @@
-#define AppName "Mapivo"
+﻿#define AppName "Mapivo"
 
-#define AppVersion "1.0.1.1"
+#define AppVersion "1.0.1.2"
 
 #define AppPublisher "Mapivo"
 

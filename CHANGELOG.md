@@ -1,4 +1,30 @@
-# Changelog
+﻿# Changelog
+
+## 1.0.1.2
+
+### Fixed
+
+- **Settings/config tools crashing in the game folder (PES 2012/2013 and
+  similar)** — the proxy DLLs sit in the game folder, so Windows loads them
+  into *every* exe there. Inside `settings.exe` the dinput8 proxy hid all
+  controllers, and the tool crashed. Each proxy now reads a `host=` line from
+  `mapivo.ini` and only acts inside the exe the profile was installed for;
+  in any other exe (`settings.exe`, launchers, crash reporters) it passes
+  through untouched, so those tools keep seeing the real controllers.
+- **Games that load XInput by name getting no virtual pad (PES 2012)** —
+  PES 2012 names `xinput1_1.dll` at runtime instead of importing it, so the
+  proxy was never placed and the pad never reached the game. The hook now
+  detects the XInput DLL a game references at runtime and proxies that name,
+  while the DLL name shown in the UI matches what actually gets installed.
+- **Real pad seen twice** — when the game used both DirectInput and XInput,
+  the dinput8 and xinput proxies now coexist correctly instead of one being
+  dropped, so the pad is served without the real device showing up twice.
+- Stale proxy DLLs from an earlier install are removed, so switching a game
+  from one XInput variant to another no longer leaves the old DLL behind.
+
+### Notes
+
+- Everything from 1.0.1.1 is included.
 
 ## 1.0.1.1
 

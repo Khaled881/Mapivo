@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <string.h>
 
 typedef HRESULT (WINAPI *CREATE8)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
 typedef BOOL (WINAPI *EI8CB)(const void*, void*);
@@ -21,6 +22,13 @@ static HMODULE RealModule(void)
 
 // Pads are served to the game as virtual XInput controllers only, so the real
 // ones must not also show up through DirectInput (FIFA listed them twice).
+//
+// Hiding is only safe inside the exe the profile was installed for. The same
+// dinput8.dll sits in the folder for every exe there, so settings.exe and
+// launchers would otherwise find zero controllers and crash. mapivo.ini names
+// the intended exe with a "host=" line (written by the app); any other process
+// passes through untouched. An ini without host= keeps the old hide-everywhere
+// behavior for backward compatibility.
 static int HideEnabled(void)
 {
     static int done, hide;
@@ -31,8 +39,40 @@ static int HideEnabled(void)
         if (GetModuleFileNameA(NULL, exe, MAX_PATH) &&
             (slash = strrchr(exe, '\\')) != NULL)
         {
-            wsprintfA(slash, "\\\\mapivo.ini");
-            hide = GetFileAttributesA(exe) != INVALID_FILE_ATTRIBUTES;
+            char hostFile[MAX_PATH];
+            lstrcpynA(hostFile, slash + 1, sizeof hostFile);
+            wsprintfA(slash, "\\mapivo.ini");
+            if (GetFileAttributesA(exe) == INVALID_FILE_ATTRIBUTES) return 0;
+
+            // Read the host= line; empty means "hide in every process".
+            HANDLE h = CreateFileA(exe, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                   NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+            char host[MAX_PATH] = { 0 };
+            if (h != INVALID_HANDLE_VALUE)
+            {
+                char buf[4096] = { 0 };
+                DWORD rd = 0;
+                ReadFile(h, buf, sizeof(buf) - 1, &rd, NULL);
+                CloseHandle(h);
+                char *line = buf;
+                while (line && *line)
+                {
+                    char *next = strchr(line, '\n');
+                    if (next) *next++ = 0;
+                    if (strncmp(line, "host=", 5) == 0)
+                    {
+                        char *v = line + 5;
+                        while (*v == ' ' || *v == '\t') v++;
+                        lstrcpynA(host, v, sizeof host);
+                        char *e = host + lstrlenA(host);
+                        while (e > host && (e[-1] == '\r' || e[-1] == ' ' || e[-1] == '\t')) *--e = 0;
+                        break;
+                    }
+                    line = next;
+                }
+            }
+            if (!host[0]) hide = 1;                    // legacy ini: hide everywhere
+            else hide = _stricmp(host, hostFile) == 0;  // only in the chosen exe
         }
     }
     return hide;
