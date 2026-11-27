@@ -1,4 +1,4 @@
-# Mapivo
+﻿# Mapivo
 
 [English](README.md) | [فارسی](README.fa.md)
 
@@ -13,7 +13,7 @@ profiles, button mapping, deadzones and vibration.
 
 ## Install
 
-Download **`Mapivo-Setup-1.0.1.1.exe`** from the [Releases](../../releases) page and run it.
+Download **`Mapivo-Setup-1.0.1.2.exe`** from the [Releases](../../releases) page and run it.
 
 - One setup for both **x64** and **ARM64** Windows; it picks the right build automatically.
 
@@ -88,7 +88,7 @@ Then build the installer with [Inno Setup](https://jrsoftware.org/isinfo.php) 7:
 "C:\Program Files\Inno Setup 7\ISCC.exe" installer\Mapivo.iss
 ```
 
-The setup file is written to `out/installer/Mapivo-Setup-1.0.1.1.exe` and contains both the x64 and ARM64 builds.
+The setup file is written to `out/installer/Mapivo-Setup-1.0.1.2.exe` and contains both the x64 and ARM64 builds.
 
 ---
 
